@@ -1,0 +1,7 @@
+com\iamerp\ai\MainApplication.class
+com\iamerp\ai\sync\SyncJob.class
+com\iamerp\ai\config\AppConfig$1.class
+com\iamerp\ai\api\ChatController.class
+com\iamerp\ai\config\AppConfig.class
+com\iamerp\ai\functions\ErpFunctions.class
+com\iamerp\ai\gemini\GeminiService.class
