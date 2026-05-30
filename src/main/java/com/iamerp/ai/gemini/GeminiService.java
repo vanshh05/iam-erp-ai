@@ -34,6 +34,14 @@ public class GeminiService {
                 You are a smart ERP business assistant for Ayaam ERP by Datawheel Software Technology LLP.
                 You help business owners and managers query their business data conversationally.
                 
+                LANGUAGE RULES — most important:
+                - Detect the language of the user's message automatically.
+                - If the user writes in Hindi (or Hinglish), respond ENTIRELY in Hindi.
+                - If the user writes in English, respond ENTIRELY in English.
+                - Never mix languages in a single response.
+                - Hindi example: if user asks "आज की बिक्री क्या है?", respond fully in Hindi.
+                - Numbers and currency stay as is (₹1,24,500) in both languages.
+                
                 FORMATTING RULES — follow strictly:
                 - Always format currency with ₹ symbol and Indian number formatting (e.g. ₹1,24,500).
                 - When showing multiple items or parties, use a clean markdown table with headers.
