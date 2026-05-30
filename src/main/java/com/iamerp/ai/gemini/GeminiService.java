@@ -10,10 +10,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.*;
 
-/**
- * Handles all communication with the Gemini API.
- * Uses function calling so Gemini decides which ERP query to run.
- */
 @Service
 public class GeminiService {
 
@@ -25,13 +21,33 @@ public class GeminiService {
 
     private final ErpFunctions erpFunctions;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final WebClient webClient = WebClient.builder().build();
+    private final WebClient webClient = WebClient.builder()
+            .codecs(c -> c.defaultCodecs().maxInMemorySize(2 * 1024 * 1024))
+            .build();
 
     public GeminiService(ErpFunctions erpFunctions) {
         this.erpFunctions = erpFunctions;
     }
 
-    // ─── Tool definitions (what Gemini can call) ──────────────────────────────
+    private String buildSystemPrompt() {
+        return """
+                You are a smart ERP business assistant for Ayaam ERP by Datawheel Software Technology LLP.
+                You help business owners and managers query their business data conversationally.
+                
+                FORMATTING RULES — follow strictly:
+                - Always format currency with ₹ symbol and Indian number formatting (e.g. ₹1,24,500).
+                - When showing multiple items or parties, use a clean markdown table with headers.
+                - Keep responses short and to the point — no unnecessary explanation.
+                - Highlight important numbers in **bold**.
+                - If showing stock, always flag low stock items with ⚠️.
+                - If showing overdue parties, flag high overdue days with 🔴.
+                - For single item or party queries, respond in 2-3 clean lines, no table needed.
+                - Always end with a one-line insight or action if relevant.
+                - Never show raw JSON or pipe-separated text.
+                - Date format: DD MMM YYYY (e.g. 22 May 2026).
+                - Never make up data — only report what the functions return.
+                """;
+    }
 
     private JsonNode buildToolDefinitions() throws Exception {
         String toolsJson = """
@@ -190,39 +206,16 @@ public class GeminiService {
         return mapper.readTree(toolsJson);
     }
 
-    // ─── System prompt ─────────────────────────────────────────────────────────
-
-    private String buildSystemPrompt() {
-        return """
-                You are an intelligent ERP assistant for IAM ERP.
-                You help business owners and managers query their business data conversationally.
-                
-                Rules:
-                - Always use the provided functions to fetch real data before answering.
-                - Format all Indian currency values with ₹ symbol and Indian number formatting (e.g. ₹1,24,500).
-                - Keep responses concise, clear and business-friendly.
-                - If a party name or item name is not found, suggest the user check the spelling.
-                - For date ranges, if not specified assume current month or today.
-                - Never make up data — only report what the functions return.
-                - If the data shows low stock or overdue payments, proactively highlight them.
-                """;
-    }
-
-    // ─── Main chat method ─────────────────────────────────────────────────────
-
     public String chat(String userMessage, List<Map<String, Object>> conversationHistory) {
         try {
-            // Build request body
             ObjectNode requestBody = mapper.createObjectNode();
 
-            // System instruction
             ObjectNode systemInstruction = mapper.createObjectNode();
             ObjectNode sysPart = mapper.createObjectNode();
             sysPart.put("text", buildSystemPrompt());
             systemInstruction.set("parts", mapper.createArrayNode().add(sysPart));
             requestBody.set("systemInstruction", systemInstruction);
 
-            // Conversation history + new message
             ArrayNode contents = mapper.createArrayNode();
             for (Map<String, Object> turn : conversationHistory) {
                 ObjectNode content = mapper.createObjectNode();
@@ -247,13 +240,11 @@ public class GeminiService {
             requestBody.set("contents", contents);
             requestBody.set("tools", buildToolDefinitions());
 
-            // Generation config
             ObjectNode genConfig = mapper.createObjectNode();
-            genConfig.put("temperature", 0.2);
-            genConfig.put("maxOutputTokens", 1024);
+            genConfig.put("temperature", 0.1);
+            genConfig.put("maxOutputTokens", 2048);
             requestBody.set("generationConfig", genConfig);
 
-            // Call Gemini
             String url = apiUrl + "?key=" + apiKey;
             String responseStr = webClient.post()
                     .uri(url)
@@ -271,8 +262,6 @@ public class GeminiService {
         }
     }
 
-    // ─── Process Gemini response + execute function calls ─────────────────────
-
     private String processGeminiResponse(JsonNode response,
                                           String originalMessage,
                                           List<Map<String, Object>> history) throws Exception {
@@ -282,34 +271,22 @@ public class GeminiService {
         JsonNode content = candidates.get(0).path("content");
         JsonNode parts = content.path("parts");
 
-        // Check if Gemini wants to call a function
         for (JsonNode part : parts) {
             if (part.has("functionCall")) {
                 JsonNode funcCall = part.get("functionCall");
                 String funcName = funcCall.get("name").asText();
                 JsonNode args = funcCall.path("args");
-
-                // Execute the function
                 String funcResult = executeFunctionCall(funcName, args);
-
-                // Send function result back to Gemini for final response
-                return sendFunctionResultToGemini(
-                        originalMessage, funcName, funcResult, history
-                );
+                return sendFunctionResultToGemini(originalMessage, funcName, funcResult, history);
             }
         }
 
-        // No function call — direct text response
         StringBuilder textResponse = new StringBuilder();
         for (JsonNode part : parts) {
-            if (part.has("text")) {
-                textResponse.append(part.get("text").asText());
-            }
+            if (part.has("text")) textResponse.append(part.get("text").asText());
         }
         return textResponse.toString();
     }
-
-    // ─── Route function calls to ErpFunctions ────────────────────────────────
 
     private String executeFunctionCall(String funcName, JsonNode args) {
         return switch (funcName) {
@@ -349,8 +326,6 @@ public class GeminiService {
         };
     }
 
-    // ─── Send function result back to Gemini for formatting ──────────────────
-
     private String sendFunctionResultToGemini(String originalMessage,
                                                String funcName,
                                                String funcResult,
@@ -365,7 +340,6 @@ public class GeminiService {
 
         ArrayNode contents = mapper.createArrayNode();
 
-        // Previous history
         for (Map<String, Object> turn : history) {
             ObjectNode content = mapper.createObjectNode();
             content.put("role", (String) turn.get("role"));
@@ -377,7 +351,6 @@ public class GeminiService {
             contents.add(content);
         }
 
-        // Original user message
         ObjectNode userContent = mapper.createObjectNode();
         userContent.put("role", "user");
         ArrayNode userParts = mapper.createArrayNode();
@@ -387,7 +360,6 @@ public class GeminiService {
         userContent.set("parts", userParts);
         contents.add(userContent);
 
-        // Function result as model turn
         ObjectNode funcResultContent = mapper.createObjectNode();
         funcResultContent.put("role", "model");
         ArrayNode funcParts = mapper.createArrayNode();
@@ -403,8 +375,8 @@ public class GeminiService {
         requestBody.set("contents", contents);
 
         ObjectNode genConfig = mapper.createObjectNode();
-        genConfig.put("temperature", 0.2);
-        genConfig.put("maxOutputTokens", 1024);
+        genConfig.put("temperature", 0.1);
+        genConfig.put("maxOutputTokens", 2048);
         requestBody.set("generationConfig", genConfig);
 
         String url = apiUrl + "?key=" + apiKey;
