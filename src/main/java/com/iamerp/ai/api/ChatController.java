@@ -46,13 +46,13 @@ public class ChatController {
         Map<String, Object> response = new HashMap<>();
         try {
             String message = (String) request.get("message");
+            String language = (String) request.getOrDefault("language", "en");
             if (message == null || message.isBlank()) {
                 response.put("success", false);
                 response.put("error", "Message cannot be empty");
                 return ResponseEntity.badRequest().body(response);
             }
 
-            // Get conversation history (optional)
             List<Map<String, Object>> history = new ArrayList<>();
             Object historyObj = request.get("history");
             if (historyObj instanceof List<?> histList) {
@@ -66,7 +66,7 @@ public class ChatController {
                 }
             }
 
-            String reply = geminiService.chat(message.trim(), history);
+            String reply = geminiService.chat(message.trim(), history, language);
 
             response.put("success", true);
             response.put("reply", reply);

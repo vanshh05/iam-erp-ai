@@ -30,31 +30,51 @@ public class GeminiService {
     }
 
     private String buildSystemPrompt() {
+        java.time.LocalDate today = java.time.LocalDate.now();
+        String todayStr = today.format(java.time.format.DateTimeFormatter.ofPattern("dd MMMM yyyy"));
+        String currentMonth = today.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
+        String prevMonth = today.minusMonths(1).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
+        String prevMonthFrom = today.minusMonths(1).withDayOfMonth(1).toString();
+        String prevMonthTo = today.minusMonths(1).withDayOfMonth(
+            today.minusMonths(1).lengthOfMonth()).toString();
+
         return """
                 You are a smart ERP business assistant for Ayaam ERP by Datawheel Software Technology LLP.
                 You help business owners and managers query their business data conversationally.
-                
+
+                TODAY'S DATE: %s
+                CURRENT MONTH: %s
+                PREVIOUS MONTH: %s (from %s to %s)
+
+                DATE RULES — critical:
+                - Always use the above dates for any time-based query.
+                - "Today" = %s
+                - "This month" = current month %s
+                - "Previous month" or "last month" = %s (from %s to %s)
+                - "This year" = year %d
+                - Never default to 2024 or any past year — always use current dates above.
+
                 LANGUAGE RULES — most important:
-                - Detect the language of the user's message automatically.
-                - If the user writes in Hindi (or Hinglish), respond ENTIRELY in Hindi.
-                - If the user writes in English, respond ENTIRELY in English.
-                - Never mix languages in a single response.
-                - Hindi example: if user asks "आज की बिक्री क्या है?", respond fully in Hindi.
+                - The user's message will start with [LANG:EN] or [LANG:HI] — this tells you which language to respond in.
+                - [LANG:EN] = respond ENTIRELY in English.
+                - [LANG:HI] = respond ENTIRELY in Hindi.
+                - Never mix languages. Strip the [LANG:XX] tag from your response.
                 - Numbers and currency stay as is (₹1,24,500) in both languages.
-                
-                FORMATTING RULES — follow strictly:
+
+                FORMATTING RULES:
                 - Always format currency with ₹ symbol and Indian number formatting (e.g. ₹1,24,500).
                 - When showing multiple items or parties, use a clean markdown table with headers.
-                - Keep responses short and to the point — no unnecessary explanation.
+                - Keep responses short and to the point.
                 - Highlight important numbers in **bold**.
-                - If showing stock, always flag low stock items with ⚠️.
-                - If showing overdue parties, flag high overdue days with 🔴.
-                - For single item or party queries, respond in 2-3 clean lines, no table needed.
-                - Always end with a one-line insight or action if relevant.
+                - Flag low stock items with ⚠️ and high overdue days with 🔴.
                 - Never show raw JSON or pipe-separated text.
                 - Date format: DD MMM YYYY (e.g. 22 May 2026).
                 - Never make up data — only report what the functions return.
-                """;
+                """.formatted(
+                    todayStr, currentMonth, prevMonth, prevMonthFrom, prevMonthTo,
+                    todayStr, currentMonth, prevMonth, prevMonthFrom, prevMonthTo,
+                    today.getYear()
+                );
     }
 
     private JsonNode buildToolDefinitions() throws Exception {
@@ -214,7 +234,11 @@ public class GeminiService {
         return mapper.readTree(toolsJson);
     }
 
-    public String chat(String userMessage, List<Map<String, Object>> conversationHistory) {
+    public String chat(String userMessage, List<Map<String, Object>> conversationHistory, String language) {
+        // Prepend language tag so Gemini knows which language to respond in
+        String langTag = "hi".equalsIgnoreCase(language) ? "[LANG:HI] " : "[LANG:EN] ";
+        userMessage = langTag + userMessage;
+
         try {
             ObjectNode requestBody = mapper.createObjectNode();
 
