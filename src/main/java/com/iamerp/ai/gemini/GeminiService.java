@@ -284,6 +284,9 @@ public class GeminiService {
                     .header("Content-Type", "application/json")
                     .bodyValue(requestBody.toString())
                     .retrieve()
+                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
+                        clientResponse -> clientResponse.bodyToMono(String.class)
+                            .map(body -> new RuntimeException("Gemini API error " + clientResponse.statusCode() + ": " + body)))
                     .bodyToMono(String.class)
                     .block();
 
@@ -420,6 +423,9 @@ public class GeminiService {
                 .header("Content-Type", "application/json")
                 .bodyValue(requestBody.toString())
                 .retrieve()
+                .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
+                    clientResponse -> clientResponse.bodyToMono(String.class)
+                        .map(body -> new RuntimeException("Gemini API error " + clientResponse.statusCode() + ": " + body)))
                 .bodyToMono(String.class)
                 .block();
 
