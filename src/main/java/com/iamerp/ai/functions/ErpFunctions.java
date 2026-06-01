@@ -26,6 +26,35 @@ public class ErpFunctions {
         this.dataSource = dataSource;
     }
 
+    // ─── 0. Date info helper ──────────────────────────────────────────────────
+
+    /**
+     * Returns current date context so Gemini always knows the exact date.
+     */
+    public String getCurrentDateInfo() {
+        LocalDate today = LocalDate.now();
+        LocalDate prevMonthStart = today.minusMonths(1).withDayOfMonth(1);
+        LocalDate prevMonthEnd   = today.minusMonths(1).withDayOfMonth(today.minusMonths(1).lengthOfMonth());
+        ObjectNode info = mapper.createObjectNode();
+        info.put("today",              today.toString());
+        info.put("current_month_from", today.withDayOfMonth(1).toString());
+        info.put("current_month_to",   today.toString());
+        info.put("prev_month_from",    prevMonthStart.toString());
+        info.put("prev_month_to",      prevMonthEnd.toString());
+        info.put("current_year",       today.getYear());
+        return info.toString();
+    }
+
+    /**
+     * Get previous month sales — no date params needed, calculated automatically.
+     */
+    public String getPreviousMonthSales() {
+        LocalDate today = LocalDate.now();
+        String from = today.minusMonths(1).withDayOfMonth(1).toString();
+        String to   = today.minusMonths(1).withDayOfMonth(today.minusMonths(1).lengthOfMonth()).toString();
+        return getCumulativeSales(from, to);
+    }
+
     // ─── 1. Stock queries ─────────────────────────────────────────────────────
 
     /**
@@ -142,10 +171,12 @@ public class ErpFunctions {
      */
     public String getCumulativeSales(String fromDate, String toDate) {
         try (Connection conn = dataSource.getConnection()) {
+            LocalDate today = LocalDate.now();
+            // Default: current month
             String from = (fromDate != null && !fromDate.isBlank()) ? fromDate
-                          : LocalDate.now().withDayOfMonth(1).toString();
+                          : today.withDayOfMonth(1).toString();
             String to   = (toDate != null && !toDate.isBlank()) ? toDate
-                          : LocalDate.now().toString();
+                          : today.toString();
 
             String sql = "SELECT SUM(total_sales) AS total_sales, SUM(total_bills_count) AS total_bills, " +
                          "SUM(cash_sales) AS cash_sales, SUM(credit_sales) AS credit_sales, " +

@@ -101,7 +101,11 @@ public class GeminiService {
                 "parameters": { "type": "object", "properties": {} }
               },
               {
-                "name": "get_today_sales",
+                "name": "get_previous_month_sales",
+                "description": "Get total sales for the previous month. Use this when user asks for last month or previous month sales. No parameters needed.",
+                "parameters": { "type": "object", "properties": {} }
+              },
+              {
                 "description": "Get today's total sales, number of bills, cash and credit breakdown, collection and tax",
                 "parameters": { "type": "object", "properties": {} }
               },
@@ -326,6 +330,8 @@ public class GeminiService {
                     erpFunctions.getCurrentStock(args.path("item_name").asText(null));
             case "get_low_stock_items" ->
                     erpFunctions.getLowStockItems();
+            case "get_previous_month_sales" ->
+                    erpFunctions.getPreviousMonthSales();
             case "get_today_sales" ->
                     erpFunctions.getTodaySales();
             case "get_cumulative_sales" ->
