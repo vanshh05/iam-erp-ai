@@ -103,6 +103,7 @@ public class GeminiService {
                 "parameters": { "type": "object", "properties": {} }
               },
               {
+                "name": "get_today_sales",
                 "description": "Get today's total sales, number of bills, cash and credit breakdown, collection and tax",
                 "parameters": { "type": "object", "properties": {} }
               },
