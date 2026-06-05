@@ -3,7 +3,6 @@ package com.iamerp.ai.functions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
@@ -22,7 +21,7 @@ public class ErpFunctions {
     private final DataSource dataSource;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public ErpFunctions(@Qualifier("supabaseDataSource") DataSource dataSource) {
+    public ErpFunctions(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
