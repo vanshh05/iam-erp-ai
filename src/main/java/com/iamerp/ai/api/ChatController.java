@@ -43,7 +43,7 @@ public class ChatController {
                 }
             }
 
-            String reply = geminiService.chat(message.trim(), history, language, companyId);
+            String reply = method(message, history, language, companyId);
             response.put("success", true);
             response.put("reply", reply);
             return ResponseEntity.ok(response);
@@ -62,5 +62,10 @@ public class ChatController {
         response.put("service", "Ayaam ERP AI Assistant");
         response.put("timestamp", new Date().toString());
         return ResponseEntity.ok(response);
+    }
+
+    private String method(String message, List<Map<String, Object>> history, String language, String companyId) {
+        String reply = geminiService.chat(message.trim(), history, language, companyId);
+        return reply;
     }
 }

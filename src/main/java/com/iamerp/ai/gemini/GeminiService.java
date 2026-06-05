@@ -1,14 +1,17 @@
 package com.iamerp.ai.gemini;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.*;
-import com.iamerp.ai.functions.ErpFunctions;
+import java.util.List;
+import java.util.Map;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.util.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.iamerp.ai.functions.ErpFunctions;
 
 @Service
 public class GeminiService {
@@ -236,7 +239,7 @@ public class GeminiService {
         return mapper.readTree(toolsJson);
     }
 
-    public String chat(String userMessage, List<Map<String, Object>> conversationHistory, String language) {
+public String chat(String userMessage, List<Map<String, Object>> conversationHistory, String language, String companyId) {
         // Prepend language tag so Gemini knows which language to respond in
         String langTag = "hi".equalsIgnoreCase(language) ? "[LANG:HI] " : "[LANG:EN] ";
         userMessage = langTag + userMessage;
