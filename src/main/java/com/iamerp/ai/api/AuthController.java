@@ -17,7 +17,7 @@ public class AuthController {
     public ResponseEntity<Map<String, Object>> verifyLicense(@RequestBody Map<String, Object> request) {
         Map<String, Object> response = new HashMap<>();
         response.put("success",      true);
-        response.put("company_id",   "COMP001");
+        response.put("company_id",   "HOTAGE INDIA");
         response.put("company_name", "Ayaam ERP");
         response.put("owner_name",   "Owner");
         return ResponseEntity.ok(response);
@@ -30,7 +30,7 @@ public class AuthController {
         response.put("full_name",    "Business Owner");
         response.put("role",         "Owner");
         response.put("username",     "owner");
-        response.put("company_id",   "COMP001");
+        response.put("company_id",   "HOTAGE INDIA");
         response.put("company_name", "Ayaam ERP");
         return ResponseEntity.ok(response);
     }

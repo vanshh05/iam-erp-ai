@@ -266,7 +266,7 @@ public class GeminiService {
     }
 
     private String executeFunctionCall(String funcName, JsonNode args) {
-        String companyId = "COMP001";
+        String companyId = "HOTAGE INDIA";
         return switch (funcName) {
             case "get_previous_month_sales" ->
                     erpFunctions.getPreviousMonthSales(companyId);
