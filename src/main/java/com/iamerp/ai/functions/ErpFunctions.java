@@ -7,14 +7,9 @@ import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
 import java.sql.*;
-import java.sql.Date;
 import java.time.LocalDate;
 import java.util.*;
 
-/**
- * All query functions that Gemini can call.
- * Each method queries the Supabase AI tables and returns a clean string result.
- */
 @Service
 public class ErpFunctions {
 
@@ -25,459 +20,293 @@ public class ErpFunctions {
         this.dataSource = dataSource;
     }
 
-    // ─── 0. Date info helper ──────────────────────────────────────────────────
-
-    /**
-     * Returns current date context so Gemini always knows the exact date.
-     */
-    public String getCurrentDateInfo() {
-        LocalDate today = LocalDate.now();
-        LocalDate prevMonthStart = today.minusMonths(1).withDayOfMonth(1);
-        LocalDate prevMonthEnd   = today.minusMonths(1).withDayOfMonth(today.minusMonths(1).lengthOfMonth());
-        ObjectNode info = mapper.createObjectNode();
-        info.put("today",              today.toString());
-        info.put("current_month_from", today.withDayOfMonth(1).toString());
-        info.put("current_month_to",   today.toString());
-        info.put("prev_month_from",    prevMonthStart.toString());
-        info.put("prev_month_to",      prevMonthEnd.toString());
-        info.put("current_year",       today.getYear());
-        return info.toString();
+    // ─── Helper: format Indian currency ──────────────────────────────────────
+    private String formatAmount(double amount) {
+        return String.format("%.2f", amount);
     }
 
-    /**
-     * Get previous month sales — no date params needed, calculated automatically.
-     */
-    public String getPreviousMonthSales() {
+    // ─── 0. Date helpers ─────────────────────────────────────────────────────
+
+    public String getPreviousMonthSales(String companyId) {
         LocalDate today = LocalDate.now();
         String from = today.minusMonths(1).withDayOfMonth(1).toString();
-        String to   = today.minusMonths(1).withDayOfMonth(today.minusMonths(1).lengthOfMonth()).toString();
-        return getCumulativeSales(from, to);
+        String to   = today.minusMonths(1).withDayOfMonth(
+                      today.minusMonths(1).lengthOfMonth()).toString();
+        return getCumulativeSales(from, to, companyId);
     }
 
-    // ─── 1. Stock queries ─────────────────────────────────────────────────────
+    // ─── 1. Party Status ──────────────────────────────────────────────────────
 
-    /**
-     * Get current stock for a specific item or all items.
-     * @param itemName null = all items, otherwise specific item
-     */
-    public String getCurrentStock(String itemName) {
-        try (Connection conn = dataSource.getConnection()) {
-            String sql;
-            PreparedStatement ps;
-
-            if (itemName != null && !itemName.isBlank()) {
-                sql = "SELECT item_name, category, current_qty, unit, min_stock_level, selling_rate " +
-                      "FROM ai_stock WHERE LOWER(item_name) LIKE LOWER(?) ORDER BY item_name";
-                ps = conn.prepareStatement(sql);
-                ps.setString(1, "%" + itemName.trim() + "%");
-            } else {
-                sql = "SELECT item_name, category, current_qty, unit, min_stock_level, selling_rate " +
-                      "FROM ai_stock ORDER BY category, item_name";
-                ps = conn.prepareStatement(sql);
-            }
-
-            ResultSet rs = ps.executeQuery();
-            ArrayNode results = mapper.createArrayNode();
-            int count = 0;
-
-            while (rs.next()) {
-                ObjectNode row = mapper.createObjectNode();
-                row.put("item", rs.getString("item_name"));
-                row.put("category", rs.getString("category"));
-                row.put("qty", rs.getDouble("current_qty"));
-                row.put("unit", rs.getString("unit"));
-                row.put("min_level", rs.getDouble("min_stock_level"));
-                row.put("rate", rs.getDouble("selling_rate"));
-                row.put("low_stock", rs.getDouble("current_qty") < rs.getDouble("min_stock_level"));
-                results.add(row);
-                count++;
-            }
-
-            if (count == 0) return "No stock found" + (itemName != null ? " for: " + itemName : "");
-            return results.toString();
-
-        } catch (SQLException e) {
-            return "Error fetching stock: " + e.getMessage();
-        }
-    }
-
-    /**
-     * Get items that are below minimum stock level.
-     */
-    public String getLowStockItems() {
-        try (Connection conn = dataSource.getConnection()) {
-            String sql = "SELECT item_name, category, current_qty, min_stock_level, unit " +
-                         "FROM ai_stock WHERE current_qty < min_stock_level ORDER BY (min_stock_level - current_qty) DESC";
-            PreparedStatement ps = conn.prepareStatement(sql);
-            ResultSet rs = ps.executeQuery();
-            ArrayNode results = mapper.createArrayNode();
-
-            while (rs.next()) {
-                ObjectNode row = mapper.createObjectNode();
-                row.put("item", rs.getString("item_name"));
-                row.put("category", rs.getString("category"));
-                row.put("current_qty", rs.getDouble("current_qty"));
-                row.put("min_level", rs.getDouble("min_stock_level"));
-                row.put("unit", rs.getString("unit"));
-                row.put("shortage", rs.getDouble("min_stock_level") - rs.getDouble("current_qty"));
-                results.add(row);
-            }
-
-            if (results.isEmpty()) return "All items are adequately stocked.";
-            return results.toString();
-
-        } catch (SQLException e) {
-            return "Error fetching low stock: " + e.getMessage();
-        }
-    }
-
-    // ─── 2. Sales queries ─────────────────────────────────────────────────────
-
-    /**
-     * Get today's sales summary.
-     */
-    public String getTodaySales() {
-        try (Connection conn = dataSource.getConnection()) {
-            String sql = "SELECT total_sales, total_bills_count, cash_sales, credit_sales, " +
-                         "total_discount_given, total_tax_collected, total_collection " +
-                         "FROM ai_daily_summary WHERE summary_date = CURRENT_DATE";
-            PreparedStatement ps = conn.prepareStatement(sql);
-            ResultSet rs = ps.executeQuery();
-
-            if (rs.next()) {
-                ObjectNode result = mapper.createObjectNode();
-                result.put("date", LocalDate.now().toString());
-                result.put("total_sales", rs.getDouble("total_sales"));
-                result.put("total_bills", rs.getInt("total_bills_count"));
-                result.put("cash_sales", rs.getDouble("cash_sales"));
-                result.put("credit_sales", rs.getDouble("credit_sales"));
-                result.put("collection", rs.getDouble("total_collection"));
-                result.put("discount_given", rs.getDouble("total_discount_given"));
-                result.put("tax_collected", rs.getDouble("total_tax_collected"));
-                return result.toString();
-            }
-            return "No sales data found for today.";
-
-        } catch (SQLException e) {
-            return "Error fetching today's sales: " + e.getMessage();
-        }
-    }
-
-    /**
-     * Get cumulative sales between two dates.
-     * @param fromDate start date (yyyy-MM-dd), null = start of current month
-     * @param toDate   end date   (yyyy-MM-dd), null = today
-     */
-    public String getCumulativeSales(String fromDate, String toDate) {
-        try (Connection conn = dataSource.getConnection()) {
-            LocalDate today = LocalDate.now();
-            // Default: current month
-            String from = (fromDate != null && !fromDate.isBlank()) ? fromDate
-                          : today.withDayOfMonth(1).toString();
-            String to   = (toDate != null && !toDate.isBlank()) ? toDate
-                          : today.toString();
-
-            String sql = "SELECT SUM(total_sales) AS total_sales, SUM(total_bills_count) AS total_bills, " +
-                         "SUM(cash_sales) AS cash_sales, SUM(credit_sales) AS credit_sales, " +
-                         "SUM(total_collection) AS total_collection, SUM(total_discount_given) AS discount, " +
-                         "SUM(total_tax_collected) AS tax, COUNT(*) AS days_count " +
-                         "FROM ai_daily_summary WHERE summary_date BETWEEN ? AND ?";
-            PreparedStatement ps = conn.prepareStatement(sql);
-            ps.setDate(1, Date.valueOf(from));
-            ps.setDate(2, Date.valueOf(to));
-            ResultSet rs = ps.executeQuery();
-
-            if (rs.next()) {
-                ObjectNode result = mapper.createObjectNode();
-                result.put("from", from);
-                result.put("to", to);
-                result.put("total_sales", rs.getDouble("total_sales"));
-                result.put("total_bills", rs.getInt("total_bills"));
-                result.put("cash_sales", rs.getDouble("cash_sales"));
-                result.put("credit_sales", rs.getDouble("credit_sales"));
-                result.put("total_collection", rs.getDouble("total_collection"));
-                result.put("total_discount", rs.getDouble("discount"));
-                result.put("total_tax", rs.getDouble("tax"));
-                result.put("days_active", rs.getInt("days_count"));
-                return result.toString();
-            }
-            return "No sales data found for the given period.";
-
-        } catch (SQLException e) {
-            return "Error fetching cumulative sales: " + e.getMessage();
-        }
-    }
-
-    /**
-     * Get individual bills for today or a specific date.
-     * @param date specific date (yyyy-MM-dd), null = today
-     */
-    public String getBillsForDate(String date, String partyName) {
-        try (Connection conn = dataSource.getConnection()) {
-            String targetDate = (date != null && !date.isBlank()) ? date : LocalDate.now().toString();
-
-            StringBuilder sql = new StringBuilder(
-                "SELECT bill_no, bill_time, party_name, gross_amount, discount_amount, " +
-                "tax_amount, net_amount, payment_mode, created_by " +
-                "FROM ai_sales WHERE bill_date = ?"
-            );
-            if (partyName != null && !partyName.isBlank()) {
-                sql.append(" AND LOWER(party_name) LIKE LOWER(?)");
-            }
-            sql.append(" ORDER BY bill_time DESC");
-
-            PreparedStatement ps = conn.prepareStatement(sql.toString());
-            ps.setDate(1, Date.valueOf(targetDate));
-            if (partyName != null && !partyName.isBlank()) {
-                ps.setString(2, "%" + partyName.trim() + "%");
-            }
-
-            ResultSet rs = ps.executeQuery();
-            ArrayNode results = mapper.createArrayNode();
-
-            while (rs.next()) {
-                ObjectNode row = mapper.createObjectNode();
-                row.put("bill_no", rs.getString("bill_no"));
-                row.put("time", rs.getString("bill_time"));
-                row.put("party", rs.getString("party_name"));
-                row.put("gross", rs.getDouble("gross_amount"));
-                row.put("discount", rs.getDouble("discount_amount"));
-                row.put("tax", rs.getDouble("tax_amount"));
-                row.put("net", rs.getDouble("net_amount"));
-                row.put("payment_mode", rs.getString("payment_mode"));
-                row.put("created_by", rs.getString("created_by"));
-                results.add(row);
-            }
-
-            if (results.isEmpty()) return "No bills found for " + targetDate;
-            return results.toString();
-
-        } catch (SQLException e) {
-            return "Error fetching bills: " + e.getMessage();
-        }
-    }
-
-    // ─── 3. Party queries ─────────────────────────────────────────────────────
-
-    /**
-     * Get full status of a specific party/trader.
-     */
-    public String getPartyStatus(String partyName) {
+    public String getPartyStatus(String partyName, String companyId) {
         try (Connection conn = dataSource.getConnection()) {
             String sql = "SELECT party_name, party_type, contact_number, outstanding_balance, " +
                          "balance_type, last_bill_date, last_bill_amount, total_business_ytd, " +
-                         "credit_limit, overdue_days " +
-                         "FROM ai_party_status WHERE LOWER(party_name) LIKE LOWER(?) ORDER BY party_name";
+                         "credit_limit, overdue_days, gstin " +
+                         "FROM ai_party_status " +
+                         "WHERE company_id = ? AND LOWER(party_name) LIKE LOWER(?) " +
+                         "ORDER BY party_name LIMIT 10";
             PreparedStatement ps = conn.prepareStatement(sql);
-            ps.setString(1, "%" + partyName.trim() + "%");
+            ps.setString(1, companyId);
+            ps.setString(2, "%" + partyName.trim() + "%");
             ResultSet rs = ps.executeQuery();
             ArrayNode results = mapper.createArrayNode();
-
             while (rs.next()) {
                 ObjectNode row = mapper.createObjectNode();
-                row.put("party_name", rs.getString("party_name"));
-                row.put("type", rs.getString("party_type"));
-                row.put("contact", rs.getString("contact_number"));
-                row.put("outstanding", rs.getDouble("outstanding_balance"));
-                row.put("balance_type", rs.getString("balance_type"));
-                row.put("last_bill_date", rs.getString("last_bill_date"));
-                row.put("last_bill_amount", rs.getDouble("last_bill_amount"));
-                row.put("total_business_ytd", rs.getDouble("total_business_ytd"));
-                row.put("credit_limit", rs.getDouble("credit_limit"));
-                row.put("overdue_days", rs.getInt("overdue_days"));
+                row.put("party_name",         rs.getString("party_name"));
+                row.put("party_type",          rs.getString("party_type"));
+                row.put("contact",             rs.getString("contact_number"));
+                row.put("outstanding_balance", formatAmount(rs.getDouble("outstanding_balance")));
+                row.put("balance_type",        rs.getString("balance_type"));
+                row.put("last_bill_date",      rs.getString("last_bill_date"));
+                row.put("last_bill_amount",    formatAmount(rs.getDouble("last_bill_amount")));
+                row.put("total_business_ytd",  formatAmount(rs.getDouble("total_business_ytd")));
+                row.put("credit_limit",        formatAmount(rs.getDouble("credit_limit")));
+                row.put("overdue_days",        rs.getInt("overdue_days"));
+                row.put("gstin",               rs.getString("gstin"));
                 results.add(row);
             }
-
             if (results.isEmpty()) return "No party found matching: " + partyName;
             return results.toString();
-
-        } catch (SQLException e) {
-            return "Error fetching party status: " + e.getMessage();
-        }
+        } catch (SQLException e) { return "Error fetching party: " + e.getMessage(); }
     }
 
-    /**
-     * Get list of parties with overdue payments.
-     */
-    public String getOverdueParties(int minOverdueDays) {
+    public String getOverdueParties(int minOverdueDays, String companyId) {
         try (Connection conn = dataSource.getConnection()) {
             String sql = "SELECT party_name, outstanding_balance, balance_type, overdue_days, " +
                          "last_bill_date, contact_number " +
-                         "FROM ai_party_status WHERE overdue_days >= ? AND balance_type = 'DR' " +
-                         "ORDER BY overdue_days DESC, outstanding_balance DESC";
+                         "FROM ai_party_status " +
+                         "WHERE company_id = ? AND overdue_days >= ? AND balance_type = 'DR' " +
+                         "ORDER BY overdue_days DESC, outstanding_balance DESC LIMIT 20";
             PreparedStatement ps = conn.prepareStatement(sql);
-            ps.setInt(1, minOverdueDays);
+            ps.setString(1, companyId);
+            ps.setInt(2, minOverdueDays);
             ResultSet rs = ps.executeQuery();
             ArrayNode results = mapper.createArrayNode();
-
             while (rs.next()) {
                 ObjectNode row = mapper.createObjectNode();
-                row.put("party", rs.getString("party_name"));
-                row.put("outstanding", rs.getDouble("outstanding_balance"));
+                row.put("party",        rs.getString("party_name"));
+                row.put("outstanding",  formatAmount(rs.getDouble("outstanding_balance")));
                 row.put("overdue_days", rs.getInt("overdue_days"));
-                row.put("last_bill_date", rs.getString("last_bill_date"));
-                row.put("contact", rs.getString("contact_number"));
+                row.put("last_bill",    rs.getString("last_bill_date"));
+                row.put("contact",      rs.getString("contact_number"));
                 results.add(row);
             }
-
             if (results.isEmpty()) return "No overdue parties found.";
             return results.toString();
-
-        } catch (SQLException e) {
-            return "Error fetching overdue parties: " + e.getMessage();
-        }
+        } catch (SQLException e) { return "Error: " + e.getMessage(); }
     }
 
-    // ─── 4. Ledger queries ────────────────────────────────────────────────────
+    // ─── 2. Sales ─────────────────────────────────────────────────────────────
 
-    /**
-     * Get ledger summary for a party over a period.
-     */
-    public String getLedgerSummary(String partyName, String fromDate, String toDate) {
+    public String getTodaySales(String companyId) {
         try (Connection conn = dataSource.getConnection()) {
-            String from = (fromDate != null && !fromDate.isBlank()) ? fromDate
-                          : LocalDate.now().withDayOfMonth(1).toString();
-            String to   = (toDate != null && !toDate.isBlank()) ? toDate
-                          : LocalDate.now().toString();
-
-            String sql = "SELECT ls.party_name, ls.period_from, ls.period_to, " +
-                         "ls.opening_balance, ls.total_debit, ls.total_credit, " +
-                         "ls.closing_balance, ls.balance_type " +
-                         "FROM ai_ledger_summary ls " +
-                         "WHERE LOWER(ls.party_name) LIKE LOWER(?) " +
-                         "AND ls.period_from >= ? AND ls.period_to <= ? " +
-                         "ORDER BY ls.party_name, ls.period_from";
+            // Try ai_daily_summary first for today
+            String sql = "SELECT summary_date, total_sales, total_bills_count, " +
+                         "cash_sales, credit_sales, total_discount_given, " +
+                         "total_collection, total_receivable, total_payable, total_purchase " +
+                         "FROM ai_daily_summary " +
+                         "WHERE company_id = ? AND summary_date = CURDATE()";
             PreparedStatement ps = conn.prepareStatement(sql);
-            ps.setString(1, "%" + partyName.trim() + "%");
+            ps.setString(1, companyId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                ObjectNode result = mapper.createObjectNode();
+                result.put("date",             LocalDate.now().toString());
+                result.put("total_sales",      formatAmount(rs.getDouble("total_sales")));
+                result.put("total_bills",      rs.getInt("total_bills_count"));
+                result.put("cash_sales",       formatAmount(rs.getDouble("cash_sales")));
+                result.put("credit_sales",     formatAmount(rs.getDouble("credit_sales")));
+                result.put("total_collection", formatAmount(rs.getDouble("total_collection")));
+                result.put("total_receivable", formatAmount(rs.getDouble("total_receivable")));
+                result.put("total_payable",    formatAmount(rs.getDouble("total_payable")));
+                result.put("total_purchase",   formatAmount(rs.getDouble("total_purchase")));
+                result.put("discount_given",   formatAmount(rs.getDouble("total_discount_given")));
+                return result.toString();
+            }
+            // Fallback: aggregate directly from ai_sales
+            String fallback = "SELECT COUNT(*) as bill_count, " +
+                              "SUM(invoice_amount) as total_sales, " +
+                              "SUM(gross_amount) as gross, " +
+                              "SUM(discount_amount) as discount, " +
+                              "SUM(sgst_amount + cgst_amount + igst_amount) as total_tax, " +
+                              "SUM(taxable_amount) as taxable " +
+                              "FROM ai_sales " +
+                              "WHERE company_id = ? AND bill_date = CURDATE()";
+            PreparedStatement ps2 = conn.prepareStatement(fallback);
+            ps2.setString(1, companyId);
+            ResultSet rs2 = ps2.executeQuery();
+            if (rs2.next() && rs2.getInt("bill_count") > 0) {
+                ObjectNode result = mapper.createObjectNode();
+                result.put("date",        LocalDate.now().toString());
+                result.put("total_sales", formatAmount(rs2.getDouble("total_sales")));
+                result.put("total_bills", rs2.getInt("bill_count"));
+                result.put("gross",       formatAmount(rs2.getDouble("gross")));
+                result.put("discount",    formatAmount(rs2.getDouble("discount")));
+                result.put("total_tax",   formatAmount(rs2.getDouble("total_tax")));
+                result.put("taxable",     formatAmount(rs2.getDouble("taxable")));
+                return result.toString();
+            }
+            return "No sales data found for today (" + LocalDate.now() + ").";
+        } catch (SQLException e) { return "Error fetching today sales: " + e.getMessage(); }
+    }
+
+    public String getCumulativeSales(String fromDate, String toDate, String companyId) {
+        try (Connection conn = dataSource.getConnection()) {
+            LocalDate today = LocalDate.now();
+            String from = (fromDate != null && !fromDate.isBlank()) ? fromDate
+                          : today.withDayOfMonth(1).toString();
+            String to   = (toDate   != null && !toDate.isBlank())   ? toDate
+                          : today.toString();
+
+            // Try ai_daily_summary first
+            String sql = "SELECT SUM(total_sales) as total_sales, SUM(total_bills_count) as total_bills, " +
+                         "SUM(cash_sales) as cash_sales, SUM(credit_sales) as credit_sales, " +
+                         "SUM(total_collection) as total_collection, " +
+                         "SUM(total_discount_given) as discount, SUM(total_purchase) as total_purchase, " +
+                         "COUNT(*) as days_count " +
+                         "FROM ai_daily_summary " +
+                         "WHERE company_id = ? AND summary_date BETWEEN ? AND ?";
+            PreparedStatement ps = conn.prepareStatement(sql);
+            ps.setString(1, companyId);
             ps.setDate(2, Date.valueOf(from));
             ps.setDate(3, Date.valueOf(to));
             ResultSet rs = ps.executeQuery();
-            ArrayNode results = mapper.createArrayNode();
-
-            while (rs.next()) {
-                ObjectNode row = mapper.createObjectNode();
-                row.put("party", rs.getString("party_name"));
-                row.put("period_from", rs.getString("period_from"));
-                row.put("period_to", rs.getString("period_to"));
-                row.put("opening_balance", rs.getDouble("opening_balance"));
-                row.put("total_debit", rs.getDouble("total_debit"));
-                row.put("total_credit", rs.getDouble("total_credit"));
-                row.put("closing_balance", rs.getDouble("closing_balance"));
-                row.put("balance_type", rs.getString("balance_type"));
-                results.add(row);
+            if (rs.next() && rs.getDouble("total_sales") > 0) {
+                ObjectNode result = mapper.createObjectNode();
+                result.put("from",             from);
+                result.put("to",               to);
+                result.put("total_sales",      formatAmount(rs.getDouble("total_sales")));
+                result.put("total_bills",      rs.getInt("total_bills"));
+                result.put("cash_sales",       formatAmount(rs.getDouble("cash_sales")));
+                result.put("credit_sales",     formatAmount(rs.getDouble("credit_sales")));
+                result.put("total_collection", formatAmount(rs.getDouble("total_collection")));
+                result.put("total_purchase",   formatAmount(rs.getDouble("total_purchase")));
+                result.put("total_discount",   formatAmount(rs.getDouble("discount")));
+                result.put("days_active",      rs.getInt("days_count"));
+                return result.toString();
             }
 
-            if (results.isEmpty()) return "No ledger data found for " + partyName;
-            return results.toString();
-
-        } catch (SQLException e) {
-            return "Error fetching ledger: " + e.getMessage();
-        }
+            // Fallback: aggregate from ai_sales directly
+            String fallback = "SELECT COUNT(*) as bill_count, " +
+                              "SUM(invoice_amount) as total_sales, " +
+                              "SUM(gross_amount) as gross, " +
+                              "SUM(discount_amount) as discount, " +
+                              "SUM(sgst_amount + cgst_amount + igst_amount) as total_tax, " +
+                              "SUM(taxable_amount) as taxable " +
+                              "FROM ai_sales " +
+                              "WHERE company_id = ? AND bill_date BETWEEN ? AND ?";
+            PreparedStatement ps2 = conn.prepareStatement(fallback);
+            ps2.setString(1, companyId);
+            ps2.setDate(2, Date.valueOf(from));
+            ps2.setDate(3, Date.valueOf(to));
+            ResultSet rs2 = ps2.executeQuery();
+            if (rs2.next() && rs2.getInt("bill_count") > 0) {
+                ObjectNode result = mapper.createObjectNode();
+                result.put("from",        from);
+                result.put("to",          to);
+                result.put("total_sales", formatAmount(rs2.getDouble("total_sales")));
+                result.put("total_bills", rs2.getInt("bill_count"));
+                result.put("gross",       formatAmount(rs2.getDouble("gross")));
+                result.put("discount",    formatAmount(rs2.getDouble("discount")));
+                result.put("total_tax",   formatAmount(rs2.getDouble("total_tax")));
+                result.put("taxable",     formatAmount(rs2.getDouble("taxable")));
+                return result.toString();
+            }
+            return "No sales data found from " + from + " to " + to + ".";
+        } catch (SQLException e) { return "Error fetching sales: " + e.getMessage(); }
     }
 
-    // ─── 5. Collection queries ────────────────────────────────────────────────
-
-    /**
-     * Get collections (payments received) for today or a specific party.
-     */
-    public String getCollections(String partyName, String date) {
+    public String getBillsForDate(String date, String partyName, String companyId) {
         try (Connection conn = dataSource.getConnection()) {
+            String targetDate = (date != null && !date.isBlank()) ? date : LocalDate.now().toString();
             StringBuilder sql = new StringBuilder(
-                "SELECT receipt_no, receipt_date, party_name, amount, payment_mode, bank_name, created_by " +
-                "FROM ai_collection WHERE 1=1"
+                "SELECT bill_no, bill_date, `voucher_date`, party_name, " +
+                "gross_amount, discount_amount, sgst_amount, cgst_amount, igst_amount, " +
+                "invoice_amount, taxable_amount, payment_mode, created_by " +
+                "FROM ai_sales WHERE company_id = ? AND bill_date = ?"
             );
-            List<Object> params = new ArrayList<>();
-
-            if (date != null && !date.isBlank()) {
-                sql.append(" AND receipt_date = ?");
-                params.add(Date.valueOf(date));
-            } else {
-                sql.append(" AND receipt_date = CURRENT_DATE");
-            }
-
-            if (partyName != null && !partyName.isBlank()) {
+            if (partyName != null && !partyName.isBlank())
                 sql.append(" AND LOWER(party_name) LIKE LOWER(?)");
-                params.add("%" + partyName.trim() + "%");
-            }
-
-            sql.append(" ORDER BY receipt_date DESC, party_name");
+            sql.append(" ORDER BY bill_date DESC, bill_no DESC LIMIT 50");
 
             PreparedStatement ps = conn.prepareStatement(sql.toString());
-            for (int i = 0; i < params.size(); i++) {
-                ps.setObject(i + 1, params.get(i));
-            }
+            ps.setString(1, companyId);
+            ps.setDate(2, Date.valueOf(targetDate));
+            if (partyName != null && !partyName.isBlank())
+                ps.setString(3, "%" + partyName.trim() + "%");
 
             ResultSet rs = ps.executeQuery();
             ArrayNode results = mapper.createArrayNode();
-            double total = 0;
-
+            double totalInvoice = 0;
             while (rs.next()) {
                 ObjectNode row = mapper.createObjectNode();
-                row.put("receipt_no", rs.getString("receipt_no"));
-                row.put("date", rs.getString("receipt_date"));
-                row.put("party", rs.getString("party_name"));
-                row.put("amount", rs.getDouble("amount"));
-                row.put("mode", rs.getString("payment_mode"));
-                row.put("bank", rs.getString("bank_name"));
-                row.put("created_by", rs.getString("created_by"));
+                row.put("bill_no",        rs.getString("bill_no"));
+                row.put("date",           rs.getString("bill_date"));
+                row.put("party",          rs.getString("party_name"));
+                row.put("gross",          formatAmount(rs.getDouble("gross_amount")));
+                row.put("discount",       formatAmount(rs.getDouble("discount_amount")));
+                row.put("sgst",           formatAmount(rs.getDouble("sgst_amount")));
+                row.put("cgst",           formatAmount(rs.getDouble("cgst_amount")));
+                row.put("igst",           formatAmount(rs.getDouble("igst_amount")));
+                row.put("invoice_amount", formatAmount(rs.getDouble("invoice_amount")));
+                row.put("taxable",        formatAmount(rs.getDouble("taxable_amount")));
+                row.put("payment_mode",   rs.getString("payment_mode"));
+                row.put("created_by",     rs.getString("created_by"));
                 results.add(row);
-                total += rs.getDouble("amount");
+                totalInvoice += rs.getDouble("invoice_amount");
             }
-
-            if (results.isEmpty()) return "No collections found.";
-
+            if (results.isEmpty()) return "No bills found for " + targetDate
+                    + (partyName != null ? " for party: " + partyName : "");
             ObjectNode response = mapper.createObjectNode();
-            response.put("total_collected", total);
-            response.put("count", results.size());
-            response.set("entries", results);
+            response.put("date",          targetDate);
+            response.put("total_invoice", formatAmount(totalInvoice));
+            response.put("count",         results.size());
+            response.set("bills",         results);
             return response.toString();
-
-        } catch (SQLException e) {
-            return "Error fetching collections: " + e.getMessage();
-        }
+        } catch (SQLException e) { return "Error fetching bills: " + e.getMessage(); }
     }
 
-    // ─── 6. Stock movement queries ────────────────────────────────────────────
+    // ─── 3. Collections ───────────────────────────────────────────────────────
 
-    /**
-     * Get stock movement history for an item.
-     */
-    public String getStockMovement(String itemName, String fromDate, String toDate) {
+    public String getCollections(String partyName, String date, String companyId) {
         try (Connection conn = dataSource.getConnection()) {
-            String from = (fromDate != null && !fromDate.isBlank()) ? fromDate
-                          : LocalDate.now().minusDays(7).toString();
-            String to   = (toDate != null && !toDate.isBlank()) ? toDate
-                          : LocalDate.now().toString();
-
-            String sql = "SELECT movement_date, item_name, movement_type, qty, reference_no, party_name, rate " +
-                         "FROM ai_stock_movement " +
-                         "WHERE LOWER(item_name) LIKE LOWER(?) " +
-                         "AND movement_date BETWEEN ? AND ? " +
-                         "ORDER BY movement_date DESC, created_at DESC";
-            PreparedStatement ps = conn.prepareStatement(sql);
-            ps.setString(1, "%" + itemName.trim() + "%");
-            ps.setDate(2, Date.valueOf(from));
-            ps.setDate(3, Date.valueOf(to));
-            ResultSet rs = ps.executeQuery();
-            ArrayNode results = mapper.createArrayNode();
-
-            while (rs.next()) {
-                ObjectNode row = mapper.createObjectNode();
-                row.put("date", rs.getString("movement_date"));
-                row.put("item", rs.getString("item_name"));
-                row.put("type", rs.getString("movement_type"));
-                row.put("qty", rs.getDouble("qty"));
-                row.put("reference", rs.getString("reference_no"));
-                row.put("party", rs.getString("party_name"));
-                row.put("rate", rs.getDouble("rate"));
-                results.add(row);
+            // Use ai_daily_summary for collection totals
+            String targetDate = (date != null && !date.isBlank()) ? date : LocalDate.now().toString();
+            if (partyName == null || partyName.isBlank()) {
+                String sql = "SELECT summary_date, total_collection, total_receivable, total_payable " +
+                             "FROM ai_daily_summary WHERE company_id = ? AND summary_date = ?";
+                PreparedStatement ps = conn.prepareStatement(sql);
+                ps.setString(1, companyId);
+                ps.setDate(2, Date.valueOf(targetDate));
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    ObjectNode result = mapper.createObjectNode();
+                    result.put("date",             rs.getString("summary_date"));
+                    result.put("total_collection", formatAmount(rs.getDouble("total_collection")));
+                    result.put("total_receivable", formatAmount(rs.getDouble("total_receivable")));
+                    result.put("total_payable",    formatAmount(rs.getDouble("total_payable")));
+                    return result.toString();
+                }
+                return "No collection data for " + targetDate;
             }
-
-            if (results.isEmpty()) return "No stock movement found for " + itemName;
-            return results.toString();
-
-        } catch (SQLException e) {
-            return "Error fetching stock movement: " + e.getMessage();
-        }
+            // Party-specific: sum from ai_sales
+            String sql = "SELECT SUM(invoice_amount) as total, COUNT(*) as count " +
+                         "FROM ai_sales WHERE company_id = ? AND LOWER(party_name) LIKE LOWER(?) " +
+                         "AND bill_date = ?";
+            PreparedStatement ps = conn.prepareStatement(sql);
+            ps.setString(1, companyId);
+            ps.setString(2, "%" + partyName.trim() + "%");
+            ps.setDate(3, Date.valueOf(targetDate));
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                ObjectNode result = mapper.createObjectNode();
+                result.put("party",   partyName);
+                result.put("date",    targetDate);
+                result.put("total",   formatAmount(rs.getDouble("total")));
+                result.put("bills",   rs.getInt("count"));
+                return result.toString();
+            }
+            return "No collection data for " + partyName + " on " + targetDate;
+        } catch (SQLException e) { return "Error: " + e.getMessage(); }
     }
 }
