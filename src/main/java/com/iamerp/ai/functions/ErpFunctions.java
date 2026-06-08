@@ -3,6 +3,8 @@ package com.iamerp.ai.functions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
@@ -15,6 +17,7 @@ public class ErpFunctions {
 
     private final DataSource dataSource;
     private final ObjectMapper mapper = new ObjectMapper();
+    private static final Logger log = LoggerFactory.getLogger(ErpFunctions.class);
 
     // Whitelist of allowed tables and their allowed columns
     // This prevents SQL injection AND stops Gemini from hallucinating column names
@@ -181,6 +184,8 @@ public class ErpFunctions {
 
         String sql = "SELECT " + selectClause + " FROM " + tableName
                    + where + groupClause + orderClause + " LIMIT " + safeLimit;
+
+        log.info("[ErpFunctions] SQL: {} | Params: {}", sql, params);
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {

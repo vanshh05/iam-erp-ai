@@ -107,12 +107,19 @@ public class GeminiService {
              + "Example for 'all parties': {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"party_name\",\"label\":\"All Parties\"}\n"
              + "Example for 'all sales bills this month': {\"__export__\":true,\"table\":\"ai_sales\",\"filter_col\":\"bill_date\",\"filter_val\":\"\",\"order_by\":\"bill_date\",\"label\":\"All Sales Bills\"}\n"
              + "The frontend will intercept this JSON and handle the download directly.\n\n"
-             + "=== PARTY STATUS QUERIES ===\n"
-             + "- For any question about a specific party, supplier, or customer → use query_table on ai_party_status\n"
-             + "- Filter by party_name LIKE <name> for name search\n"
-             + "- Filter by party_type = 'Supplier' or party_type = 'Customer' for type filter\n"
-             + "- ALWAYS query ai_party_status when user asks about outstanding balance, overdue, credit limit, GSTIN of a party\n"
-             + "- If result is empty, say 'No party found matching that name'\n\n"
+             + "=== PARTY STATUS QUERIES — READ CAREFULLY ===\n"
+             + "- For ANY question about a party/supplier/customer → ALWAYS use query_table on ai_party_status\n"
+             + "- ALWAYS set select_columns='all' when querying ai_party_status — NEVER restrict to specific columns\n"
+             + "  Even if user asks ONLY for contact number, address, GSTIN, email, or any single field:\n"
+             + "  → still fetch ALL columns (select_columns='all'), then highlight the requested field in your reply\n"
+             + "  → NEVER set select_columns='contact_number' or any subset — it causes query failures\n"
+             + "- Filter by party_name LIKE <partial_name> — use the key part of the name, not the full name\n"
+             + "  Example: user asks about 'Raj Traders Delhi' → filter party_name LIKE 'Raj Traders'\n"
+             + "  Example: user asks about 'Anand Trading' → filter party_name LIKE 'Anand'\n"
+             + "- Filter by party_type = 'Supplier' or party_type = 'Customer' when user specifies type\n"
+             + "- If query returns multiple matches, show all of them in a table\n"
+             + "- If result is empty, try again with a shorter/simpler version of the party name\n"
+             + "- If still empty, say 'No party found matching that name'\n\n"
              + "=== STRICT RULES ===\n"
              + "- NEVER hallucinate data — return exactly what the tool provides\n"
              + "- NEVER add dates to a query unless the user specifically asked for a date filter\n"
@@ -164,7 +171,7 @@ public class GeminiService {
                     },
                     "select_columns": {
                       "type": "string",
-                      "description": "Comma-separated column names to return, or 'all'. Can include aggregates like SUM(total_sales), COUNT(bill_no). Example: 'summary_date,total_payment,total_collection'"
+                      "description": "Comma-separated column names to return, or 'all'. IMPORTANT: For ai_party_status, ALWAYS use 'all' regardless of what field the user asked for — fetch everything and highlight the relevant field in your response. Only restrict columns for ai_daily_summary or ai_sales when you need specific aggregates. Example for ai_daily_summary: 'summary_date,total_payment,total_collection'. Never restrict ai_party_status columns."
                     },
                     "group_by": {
                       "type": "string",
