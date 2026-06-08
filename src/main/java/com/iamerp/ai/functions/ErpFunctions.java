@@ -62,7 +62,7 @@ public class ErpFunctions {
     // group_by: column to group results by (optional)
     // order_by: column to sort by (optional)
     // sort_dir: ASC or DESC (default DESC)
-    // limit: max rows to return (default 50, max 200)
+    // limit: max rows to return (default 200, max 2000)
 
     public String queryTable(
             String tableName,
@@ -105,7 +105,7 @@ public class ErpFunctions {
         }
 
         // Validate limit
-        int safeLimit = Math.min(Math.max(limit <= 0 ? 50 : limit, 1), 200);
+        int safeLimit = Math.min(Math.max(limit <= 0 ? 200 : limit, 1), 2000);
 
         // Validate sort
         String safeSortDir = ALLOWED_SORT_DIRECTIONS.contains(

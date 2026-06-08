@@ -101,6 +101,7 @@ public class GeminiService {
              + "=== STRICT RULES ===\n"
              + "- NEVER hallucinate data — return exactly what the tool provides\n"
              + "- NEVER add dates to a query unless the user specifically asked for a date filter\n"
+             + "- If user says 'all', 'complete list', 'full list', 'सभी', 'पूरी सूची', 'give me all' → always set limit=2000 in query_table\n"
              + "- If the tool returns 'No data found' — report that truthfully, do not guess\n"
              + "- Stock data is not available — say so if asked\n"
              + "- ONLY answer ERP data questions\n\n"
@@ -163,7 +164,7 @@ public class GeminiService {
                     },
                     "limit": {
                       "type": "integer",
-                      "description": "Maximum number of rows to return. Default 50, max 200."
+                      "description": "Maximum number of rows to return. Default 200, max 2000. When user says 'all', 'complete list', 'सभी', 'पूरी list' or similar — always set this to 2000 to ensure all records are returned."
                     }
                   },
                   "required": ["table_name"]
@@ -381,7 +382,7 @@ public class GeminiService {
                     args.path("group_by").asText(null),
                     args.path("order_by").asText(null),
                     args.path("sort_direction").asText("DESC"),
-                    args.path("limit").asInt(50),
+                    args.path("limit").asInt(200),
                     companyId
                 );
             }
