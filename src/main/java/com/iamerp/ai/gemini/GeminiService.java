@@ -98,10 +98,26 @@ public class GeminiService {
              + "Previous month  = " + prevMonthStart + " to " + prevMonthEnd + "\n"
              + "This year (cal) = " + yearStart + " to " + todayIso + "\n"
              + "Financial year  = " + fyStart + " to " + fyEnd + "\n\n"
+             + "=== LARGE DATA HANDLING ===\n"
+             + "When a user asks for 'all parties', 'all suppliers', 'all customers', 'give me all details', 'complete list' or any query\n"
+             + "that would return more than 50 rows, DO NOT output the table yourself.\n"
+             + "Instead respond ONLY with this exact JSON on a single line and nothing else:\n"
+             + "{\"__export__\":true,\"table\":\"TABLE_NAME\",\"filter_col\":\"COLUMN_OR_EMPTY\",\"filter_val\":\"VALUE_OR_EMPTY\",\"order_by\":\"COLUMN_OR_EMPTY\",\"label\":\"HUMAN READABLE DESCRIPTION\"}\n"
+             + "Example for 'give me all suppliers': {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Supplier\",\"order_by\":\"party_name\",\"label\":\"All Suppliers\"}\n"
+             + "Example for 'all parties': {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"party_name\",\"label\":\"All Parties\"}\n"
+             + "Example for 'all sales bills this month': {\"__export__\":true,\"table\":\"ai_sales\",\"filter_col\":\"bill_date\",\"filter_val\":\"\",\"order_by\":\"bill_date\",\"label\":\"All Sales Bills\"}\n"
+             + "The frontend will intercept this JSON and handle the download directly.\n\n"
+             + "=== PARTY STATUS QUERIES ===\n"
+             + "- For any question about a specific party, supplier, or customer → use query_table on ai_party_status\n"
+             + "- Filter by party_name LIKE <name> for name search\n"
+             + "- Filter by party_type = 'Supplier' or party_type = 'Customer' for type filter\n"
+             + "- ALWAYS query ai_party_status when user asks about outstanding balance, overdue, credit limit, GSTIN of a party\n"
+             + "- If result is empty, say 'No party found matching that name'\n\n"
              + "=== STRICT RULES ===\n"
              + "- NEVER hallucinate data — return exactly what the tool provides\n"
              + "- NEVER add dates to a query unless the user specifically asked for a date filter\n"
-             + "- If user says 'all', 'complete list', 'full list', 'सभी', 'पूरी सूची', 'give me all' → always set limit=2000 in query_table\n"
+             + "- NEVER summarize or truncate tool results — show every row returned\n"
+             + "- NEVER say 'here are the first few' — if you got data, show it all\n"
              + "- If the tool returns 'No data found' — report that truthfully, do not guess\n"
              + "- Stock data is not available — say so if asked\n"
              + "- ONLY answer ERP data questions\n\n"
@@ -304,7 +320,7 @@ public class GeminiService {
         followUpBody.set("contents", contentsWithTools);
         ObjectNode genConfig = mapper.createObjectNode();
         genConfig.put("temperature", 0.1);
-        genConfig.put("maxOutputTokens", 3000);
+        genConfig.put("maxOutputTokens", 65536);
         followUpBody.set("generationConfig", genConfig);
 
         String followUpStr = callGemini(followUpBody);
@@ -332,7 +348,7 @@ public class GeminiService {
 
         ObjectNode genConfig = mapper.createObjectNode();
         genConfig.put("temperature", 0.1);
-        genConfig.put("maxOutputTokens", 3000);
+        genConfig.put("maxOutputTokens", 65536);
         body.set("generationConfig", genConfig);
 
         return body;
