@@ -22,149 +22,184 @@ public class GeminiService {
     private final ErpFunctions erpFunctions;
     private final ObjectMapper mapper = new ObjectMapper();
     private final WebClient webClient = WebClient.builder()
-            .codecs(c -> c.defaultCodecs().maxInMemorySize(2 * 1024 * 1024))
+            .codecs(c -> c.defaultCodecs().maxInMemorySize(4 * 1024 * 1024))
             .build();
 
     public GeminiService(ErpFunctions erpFunctions) {
         this.erpFunctions = erpFunctions;
     }
 
+    // ─── System Prompt ────────────────────────────────────────────────────────
     private String buildSystemPrompt() {
         java.time.LocalDate today = java.time.LocalDate.now();
-        String todayStr      = today.format(java.time.format.DateTimeFormatter.ofPattern("dd MMMM yyyy"));
-        String currentMonth  = today.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
-        String prevMonth     = today.minusMonths(1).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
-        String prevMonthFrom = today.minusMonths(1).withDayOfMonth(1).toString();
-        String prevMonthTo   = today.minusMonths(1).withDayOfMonth(today.minusMonths(1).lengthOfMonth()).toString();
-        int    currentYear   = today.getYear();
+        String todayStr     = today.format(java.time.format.DateTimeFormatter.ofPattern("dd MMMM yyyy"));
+        String todayIso     = today.toString();
+        String currentMonth = today.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
+        String monthStart   = today.withDayOfMonth(1).toString();
+        String monthEnd     = today.toString();
+        String prevMonthStart = today.minusMonths(1).withDayOfMonth(1).toString();
+        String prevMonthEnd   = today.minusMonths(1)
+                                     .withDayOfMonth(today.minusMonths(1).lengthOfMonth()).toString();
+        String yearStart    = today.withDayOfMonth(1).withMonth(1).toString();
+        int    fy_start_yr  = today.getMonthValue() >= 4 ? today.getYear() : today.getYear() - 1;
+        String fyStart      = fy_start_yr + "-04-01";
+        String fyEnd        = (fy_start_yr + 1) + "-03-31";
 
         return "You are a strict ERP data assistant for Ayaam ERP by Datawheel Software Technology LLP.\n"
-             + "Your ONLY job is to fetch and present business data from the ERP system.\n\n"
-             + "AVAILABLE DATA — only these 3 tables exist:\n"
-             + "1. ai_party_status — party/customer/supplier info: outstanding_balance, balance_type (DR/CR), last_bill_date, last_bill_amount, total_business_ytd, credit_limit, overdue_days, gstin, contact_number\n"
-             + "2. ai_sales — individual bills: bill_no, bill_date, party_name, gross_amount, discount_amount, sgst_amount, cgst_amount, igst_amount, invoice_amount, taxable_amount, payment_mode\n"
-             + "3. ai_daily_summary — daily totals: total_sales, total_bills_count, cash_sales, credit_sales, total_collection, total_receivable, total_payable, total_purchase, total_discount_given\n\n"
-             + "STRICT BOUNDARIES:\n"
-             + "- ONLY answer questions about sales, party status, bills, collections from the above tables.\n"
-             + "- NO stock queries — stock data is not available yet.\n"
-             + "- NEVER give advice, suggestions or recommendations.\n"
-             + "- NEVER answer anything outside ERP data.\n"
-             + "- If asked about stock: say 'Stock data is not available in the system yet.'\n"
-             + "- If asked anything else outside ERP: say 'I can only answer questions about sales, bills, and party status.'\n\n"
-             + "TODAY'S DATE: " + todayStr + "\n"
-             + "CURRENT MONTH: " + currentMonth + "\n"
-             + "PREVIOUS MONTH: " + prevMonth + " (from " + prevMonthFrom + " to " + prevMonthTo + ")\n\n"
-             + "DATE RULES — critical:\n"
-             + "- Always use the above dates for any time-based query.\n"
-             + "- 'Today' = " + todayStr + "\n"
-             + "- 'This month' = " + currentMonth + "\n"
-             + "- 'Previous month' or 'last month' = " + prevMonth + " (from " + prevMonthFrom + " to " + prevMonthTo + ")\n"
-             + "- 'This year' = " + currentYear + "\n"
-             + "- Never default to 2024 or any past year — always use current dates above.\n\n"
-             + "LANGUAGE RULES:\n"
-             + "- The user's message will start with [LANG:EN] or [LANG:HI].\n"
-             + "- [LANG:EN] = respond ENTIRELY in English.\n"
-             + "- [LANG:HI] = respond ENTIRELY in Hindi.\n"
-             + "- Never mix languages. Strip the [LANG:XX] tag from your response.\n\n"
-             + "FORMATTING RULES:\n"
-             + "- Always format currency with the rupee symbol and Indian number formatting (e.g. 1,24,500).\n"
-             + "- When showing multiple items or parties, use a clean markdown table with headers.\n"
-             + "- Keep responses short and factual — no filler words.\n"
-             + "- Highlight important numbers in **bold**.\n"
-             + "- Flag low stock items with the warning symbol and high overdue days with a red circle.\n"
-             + "- Never show raw JSON or pipe-separated text.\n"
-             + "- Date format: DD MMM YYYY (e.g. 22 May 2026).\n";
+             + "Your ONLY job is to fetch and present ERP data EXACTLY as returned by the tools.\n\n"
+             + "=== DATABASE SCHEMA ===\n"
+             + "TABLE: ai_daily_summary (one row per company per date — use for aggregated queries)\n"
+             + "  summary_date DATE, total_sales DECIMAL, total_bills_count INT,\n"
+             + "  total_collection DECIMAL  ← money RECEIVED from customers\n"
+             + "  total_payment DECIMAL     ← money PAID OUT to suppliers (NOT the same as collection!)\n"
+             + "  total_receivable DECIMAL, total_payable DECIMAL,\n"
+             + "  cash_sales DECIMAL, credit_sales DECIMAL,\n"
+             + "  total_discount_given DECIMAL, total_purchase DECIMAL\n\n"
+             + "TABLE: ai_sales (individual bills/invoices)\n"
+             + "  bill_no, bill_date DATE, voucher_date TIME, party_name,\n"
+             + "  gross_amount, discount_amount, sgst_amount, cgst_amount, igst_amount,\n"
+             + "  invoice_amount (final bill value), taxable_amount,\n"
+             + "  payment_mode (Cash/Credit), created_by\n\n"
+             + "TABLE: ai_party_status (customer/supplier master)\n"
+             + "  party_name, party_type, contact_number, email, address,\n"
+             + "  outstanding_balance, balance_type (DR=they owe us / CR=we owe them),\n"
+             + "  last_bill_date, last_bill_amount, total_business_ytd,\n"
+             + "  credit_limit, overdue_days, gstin\n\n"
+             + "=== CRITICAL COLUMN RULES — NEVER CONFUSE THESE ===\n"
+             + "- total_collection = money received FROM customers (inflow)\n"
+             + "- total_payment    = money paid OUT to suppliers (outflow) — COMPLETELY DIFFERENT from collection\n"
+             + "- cash_sales vs credit_sales = split of sales by payment mode in ai_daily_summary\n"
+             + "- payment_mode in ai_sales = 'Cash' or 'Credit' for each individual bill\n"
+             + "- invoice_amount = final amount on the bill (use this for bill totals)\n"
+             + "- When user asks for 'payment' or 'total payment' → use total_payment column\n"
+             + "- When user asks for 'collection' → use total_collection column\n"
+             + "- NEVER substitute one for the other\n\n"
+             + "=== HOW TO USE TOOLS ===\n"
+             + "You have TWO primary tools: query_table and get_table_schema.\n\n"
+             + "query_table lets you retrieve ANY data dynamically with filters/sorts/grouping.\n"
+             + "ALWAYS call query_table with the exact column names from the schema above.\n"
+             + "ALWAYS verify column names from schema before querying — do not guess.\n"
+             + "If unsure of a column name, call get_table_schema first.\n\n"
+             + "For ANY of these queries, use query_table:\n"
+             + "- Bills by bill_no: table=ai_sales, filter bill_no=<value>\n"
+             + "- Bills by party: table=ai_sales, filter party_name LIKE <name>, no date restriction needed\n"
+             + "- Bills for a date range: table=ai_sales, filter bill_date BETWEEN start,end\n"
+             + "- Credit sales for a date: table=ai_daily_summary, filter summary_date=<date>, select credit_sales\n"
+             + "- Cash sales for a date: table=ai_daily_summary, filter summary_date=<date>, select cash_sales\n"
+             + "- Payment (outflow) for a date: table=ai_daily_summary, filter summary_date=<date>, select total_payment\n"
+             + "- Collection for a date: table=ai_daily_summary, filter summary_date=<date>, select total_collection\n"
+             + "- Purchase for a date: table=ai_daily_summary, filter summary_date=<date>, select total_purchase\n"
+             + "- Party search: table=ai_party_status, filter party_name LIKE <name>\n"
+             + "- Overdue parties: use get_overdue_parties tool\n"
+             + "- Today summary: use get_today_summary tool\n\n"
+             + "=== DATE REFERENCE ===\n"
+             + "Today           = " + todayStr + " (" + todayIso + ")\n"
+             + "This month      = " + monthStart + " to " + monthEnd + "\n"
+             + "Previous month  = " + prevMonthStart + " to " + prevMonthEnd + "\n"
+             + "This year (cal) = " + yearStart + " to " + todayIso + "\n"
+             + "Financial year  = " + fyStart + " to " + fyEnd + "\n\n"
+             + "=== STRICT RULES ===\n"
+             + "- NEVER hallucinate data — return exactly what the tool provides\n"
+             + "- NEVER add dates to a query unless the user specifically asked for a date filter\n"
+             + "- If the tool returns 'No data found' — report that truthfully, do not guess\n"
+             + "- Stock data is not available — say so if asked\n"
+             + "- ONLY answer ERP data questions\n\n"
+             + "=== LANGUAGE ===\n"
+             + "- Message starts with [LANG:EN] → respond in English only\n"
+             + "- Message starts with [LANG:HI] → respond in Hindi only\n"
+             + "- Never mix languages\n\n"
+             + "=== OUTPUT FORMAT ===\n"
+             + "- Currency: use ₹ with Indian number format (e.g. ₹1,24,500.00)\n"
+             + "- Dates: DD MMM YYYY format (e.g. 01 Jun 2026)\n"
+             + "- Multiple rows: clean markdown table with headers\n"
+             + "- Single value: bold the key number\n"
+             + "- Never show raw JSON\n";
     }
 
+    // ─── Tool Definitions ─────────────────────────────────────────────────────
     private JsonNode buildToolDefinitions() throws Exception {
         String toolsJson = """
         [
           {
             "functionDeclarations": [
               {
-                "name": "get_previous_month_sales",
-                "description": "Get total sales for the previous month. Use this when user asks for last month or previous month sales. No parameters needed.",
-                "parameters": { "type": "object", "properties": {} }
-              },
-              {
-                "name": "get_today_sales",
-                "description": "Get today's total sales, number of bills, cash and credit breakdown, collection and purchase total",
-                "parameters": { "type": "object", "properties": {} }
-              },
-              {
-                "name": "get_cumulative_sales",
-                "description": "Get total sales between two dates or for a specific month/period. Use this for monthly sales, yearly sales, or any date range.",
+                "name": "query_table",
+                "description": "Universal query tool. Use this to fetch ANY data from the ERP database. Supports filters on any column, sorting, grouping, and selecting specific columns. Use this for: bills by bill_no, bills by party name, sales/purchase/collection/payment for any date or date range, cash vs credit sales, party search, any custom query.",
                 "parameters": {
                   "type": "object",
                   "properties": {
-                    "from_date": {
+                    "table_name": {
                       "type": "string",
-                      "description": "Start date in yyyy-MM-dd format."
+                      "description": "Table to query. Must be one of: ai_daily_summary, ai_sales, ai_party_status"
                     },
-                    "to_date": {
-                      "type": "string",
-                      "description": "End date in yyyy-MM-dd format."
-                    }
-                  }
-                }
-              },
-              {
-                "name": "get_bills_for_date",
-                "description": "Get list of individual bills/invoices for a specific date. Each bill shows gross, discount, GST (SGST/CGST/IGST), invoice amount, taxable amount and payment mode.",
-                "parameters": {
-                  "type": "object",
-                  "properties": {
-                    "date": {
-                      "type": "string",
-                      "description": "Date in yyyy-MM-dd format. Default is today."
+                    "filters": {
+                      "type": "array",
+                      "description": "List of filter conditions (do NOT include company_id — it is added automatically). Each filter has column, operator, value.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "column":   { "type": "string", "description": "Exact column name from the table schema" },
+                          "operator": { "type": "string", "description": "One of: =, !=, >, <, >=, <=, LIKE, BETWEEN, IN. Use LIKE for partial name match. Use BETWEEN for date ranges with value='start,end'." },
+                          "value":    { "type": "string", "description": "Filter value. For BETWEEN use 'yyyy-MM-dd,yyyy-MM-dd'. For IN use comma-separated values." }
+                        },
+                        "required": ["column", "operator", "value"]
+                      }
                     },
-                    "party_name": {
+                    "select_columns": {
                       "type": "string",
-                      "description": "Filter bills by party name. Optional."
-                    }
-                  }
-                }
-              },
-              {
-                "name": "get_party_status",
-                "description": "Get full account status of a party or trader. Shows outstanding balance (DR/CR), last bill date and amount, total business YTD, credit limit, overdue days, GSTIN and contact.",
-                "parameters": {
-                  "type": "object",
-                  "properties": {
-                    "party_name": {
+                      "description": "Comma-separated column names to return, or 'all'. Can include aggregates like SUM(total_sales), COUNT(bill_no). Example: 'summary_date,total_payment,total_collection'"
+                    },
+                    "group_by": {
                       "type": "string",
-                      "description": "Name or partial name of the party or trader to look up"
+                      "description": "Column to group results by. Optional. Example: 'payment_mode' to group bills by cash/credit."
+                    },
+                    "order_by": {
+                      "type": "string",
+                      "description": "Column to sort results by. Optional."
+                    },
+                    "sort_direction": {
+                      "type": "string",
+                      "description": "ASC or DESC. Default DESC."
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "description": "Maximum number of rows to return. Default 50, max 200."
                     }
                   },
-                  "required": ["party_name"]
+                  "required": ["table_name"]
+                }
+              },
+              {
+                "name": "get_table_schema",
+                "description": "Get the exact column names available in a table. Call this if you are unsure of a column name before running query_table. Pass 'all' to see all tables.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "table_name": {
+                      "type": "string",
+                      "description": "Table name, or 'all' to see all tables and columns."
+                    }
+                  },
+                  "required": ["table_name"]
+                }
+              },
+              {
+                "name": "get_today_summary",
+                "description": "Get today's complete summary: sales, bills, cash/credit split, collection, payment, purchase. Fastest way to get today's overview.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
                 }
               },
               {
                 "name": "get_overdue_parties",
-                "description": "Get list of all parties/customers who have overdue payments (balance_type DR with overdue_days > 0)",
+                "description": "Get all parties/customers with overdue payments (balance_type DR and overdue_days > 0).",
                 "parameters": {
                   "type": "object",
                   "properties": {
                     "min_overdue_days": {
                       "type": "integer",
-                      "description": "Minimum number of overdue days to filter by. Default is 1."
-                    }
-                  }
-                }
-              },
-              {
-                "name": "get_collections",
-                "description": "Get collection/receivable summary for today or a specific date. Shows total_collection, total_receivable and total_payable.",
-                "parameters": {
-                  "type": "object",
-                  "properties": {
-                    "party_name": {
-                      "type": "string",
-                      "description": "Filter by party name. Optional."
-                    },
-                    "date": {
-                      "type": "string",
-                      "description": "Date in yyyy-MM-dd format. Default is today."
+                      "description": "Minimum overdue days threshold. Default 1."
                     }
                   }
                 }
@@ -176,193 +211,202 @@ public class GeminiService {
         return mapper.readTree(toolsJson);
     }
 
-    public String chat(String userMessage, List<Map<String, Object>> conversationHistory, String language) {
-        // Prepend language tag so Gemini knows which language to respond in
+    // ─── Main chat entry point ────────────────────────────────────────────────
+    public String chat(String userMessage,
+                       List<Map<String, Object>> conversationHistory,
+                       String language) {
         String langTag = "hi".equalsIgnoreCase(language) ? "[LANG:HI] " : "[LANG:EN] ";
         userMessage = langTag + userMessage;
 
         try {
-            ObjectNode requestBody = mapper.createObjectNode();
-
-            ObjectNode systemInstruction = mapper.createObjectNode();
-            ObjectNode sysPart = mapper.createObjectNode();
-            sysPart.put("text", buildSystemPrompt());
-            systemInstruction.set("parts", mapper.createArrayNode().add(sysPart));
-            requestBody.set("systemInstruction", systemInstruction);
-
-            ArrayNode contents = mapper.createArrayNode();
-            for (Map<String, Object> turn : conversationHistory) {
-                ObjectNode content = mapper.createObjectNode();
-                content.put("role", (String) turn.get("role"));
-                ArrayNode parts = mapper.createArrayNode();
-                ObjectNode part = mapper.createObjectNode();
-                part.put("text", (String) turn.get("text"));
-                parts.add(part);
-                content.set("parts", parts);
-                contents.add(content);
-            }
-
-            ObjectNode userContent = mapper.createObjectNode();
-            userContent.put("role", "user");
-            ArrayNode userParts = mapper.createArrayNode();
-            ObjectNode userPart = mapper.createObjectNode();
-            userPart.put("text", userMessage);
-            userParts.add(userPart);
-            userContent.set("parts", userParts);
-            contents.add(userContent);
-
-            requestBody.set("contents", contents);
-            requestBody.set("tools", buildToolDefinitions());
-
-            ObjectNode genConfig = mapper.createObjectNode();
-            genConfig.put("temperature", 0.1);
-            genConfig.put("maxOutputTokens", 2048);
-            requestBody.set("generationConfig", genConfig);
-
-            String url = apiUrl + "?key=" + apiKey;
-            String responseStr = webClient.post()
-                    .uri(url)
-                    .header("Content-Type", "application/json")
-                    .bodyValue(requestBody.toString())
-                    .retrieve()
-                    .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
-                        clientResponse -> clientResponse.bodyToMono(String.class)
-                            .map(body -> new RuntimeException("Gemini API error " + clientResponse.statusCode() + ": " + body)))
-                    .bodyToMono(String.class)
-                    .block();
-
+            ObjectNode requestBody = buildRequestBody(userMessage, conversationHistory, true);
+            String responseStr = callGemini(requestBody);
             JsonNode response = mapper.readTree(responseStr);
-            return processGeminiResponse(response, userMessage, conversationHistory);
-
+            return processResponse(response, userMessage, conversationHistory, 0);
         } catch (Exception e) {
             return "Sorry, I encountered an error: " + e.getMessage();
         }
     }
 
-    private String processGeminiResponse(JsonNode response,
-                                          String originalMessage,
-                                          List<Map<String, Object>> history) throws Exception {
+    // ─── Process Gemini response (handles multi-turn tool calls) ─────────────
+    private String processResponse(JsonNode response,
+                                   String originalMessage,
+                                   List<Map<String, Object>> history,
+                                   int depth) throws Exception {
+        if (depth > 3) return "Maximum tool call depth reached.";
+
         JsonNode candidates = response.path("candidates");
         if (candidates.isEmpty()) return "No response from Gemini.";
 
         JsonNode content = candidates.get(0).path("content");
-        JsonNode parts = content.path("parts");
+        JsonNode parts   = content.path("parts");
+
+        // Collect any text parts first
+        StringBuilder textParts = new StringBuilder();
+        List<JsonNode> toolCalls = new ArrayList<>();
 
         for (JsonNode part : parts) {
             if (part.has("functionCall")) {
-                JsonNode funcCall = part.get("functionCall");
-                String funcName = funcCall.get("name").asText();
-                JsonNode args = funcCall.path("args");
-                String funcResult = executeFunctionCall(funcName, args);
-                return sendFunctionResultToGemini(originalMessage, funcName, funcResult, history);
+                toolCalls.add(part.get("functionCall"));
+            } else if (part.has("text")) {
+                textParts.append(part.get("text").asText());
             }
         }
 
-        StringBuilder textResponse = new StringBuilder();
-        for (JsonNode part : parts) {
-            if (part.has("text")) textResponse.append(part.get("text").asText());
+        // If no tool calls, return the text
+        if (toolCalls.isEmpty()) {
+            return textParts.toString();
         }
-        return textResponse.toString();
+
+        // Execute all tool calls and build function response turn
+        ArrayNode contentsWithTools = buildContentsWithHistory(originalMessage, history);
+
+        // Add the model's function call turn
+        ObjectNode modelTurn = mapper.createObjectNode();
+        modelTurn.put("role", "model");
+        ArrayNode modelParts = mapper.createArrayNode();
+        for (JsonNode tc : toolCalls) {
+            ObjectNode p = mapper.createObjectNode();
+            p.set("functionCall", tc);
+            modelParts.add(p);
+        }
+        modelTurn.set("parts", modelParts);
+        contentsWithTools.add(modelTurn);
+
+        // Add function results turn
+        ObjectNode funcResultTurn = mapper.createObjectNode();
+        funcResultTurn.put("role", "user");
+        ArrayNode funcResultParts = mapper.createArrayNode();
+        for (JsonNode tc : toolCalls) {
+            String funcName = tc.get("name").asText();
+            JsonNode args   = tc.path("args");
+            String result   = executeFunctionCall(funcName, args);
+
+            ObjectNode fp = mapper.createObjectNode();
+            ObjectNode fr = mapper.createObjectNode();
+            fr.put("name", funcName);
+            ObjectNode responseNode = mapper.createObjectNode();
+            responseNode.put("result", result);
+            fr.set("response", responseNode);
+            fp.set("functionResponse", fr);
+            funcResultParts.add(fp);
+        }
+        funcResultTurn.set("parts", funcResultParts);
+        contentsWithTools.add(funcResultTurn);
+
+        // Build follow-up request with tool results
+        ObjectNode followUpBody = mapper.createObjectNode();
+        ObjectNode sysInstr = mapper.createObjectNode();
+        sysInstr.set("parts", mapper.createArrayNode().add(
+            mapper.createObjectNode().put("text", buildSystemPrompt())));
+        followUpBody.set("systemInstruction", sysInstr);
+        followUpBody.set("contents", contentsWithTools);
+        ObjectNode genConfig = mapper.createObjectNode();
+        genConfig.put("temperature", 0.1);
+        genConfig.put("maxOutputTokens", 3000);
+        followUpBody.set("generationConfig", genConfig);
+
+        String followUpStr = callGemini(followUpBody);
+        JsonNode followUp  = mapper.readTree(followUpStr);
+
+        // Recurse in case Gemini wants to make another tool call
+        return processResponse(followUp, originalMessage, history, depth + 1);
     }
 
-    private String executeFunctionCall(String funcName, JsonNode args) {
-        String companyId = "HOTAGE INDIA";
-        return switch (funcName) {
-            case "get_previous_month_sales" ->
-                    erpFunctions.getPreviousMonthSales(companyId);
-            case "get_today_sales" ->
-                    erpFunctions.getTodaySales(companyId);
-            case "get_cumulative_sales" ->
-                    erpFunctions.getCumulativeSales(
-                            args.path("from_date").asText(null),
-                            args.path("to_date").asText(null), companyId);
-            case "get_bills_for_date" ->
-                    erpFunctions.getBillsForDate(
-                            args.path("date").asText(null),
-                            args.path("party_name").asText(null), companyId);
-            case "get_party_status" ->
-                    erpFunctions.getPartyStatus(args.path("party_name").asText(""), companyId);
-            case "get_overdue_parties" ->
-                    erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
-            case "get_collections" ->
-                    erpFunctions.getCollections(
-                            args.path("party_name").asText(null),
-                            args.path("date").asText(null), companyId);
-            default -> "Function not available: " + funcName + ". Available: get_today_sales, get_cumulative_sales, get_previous_month_sales, get_bills_for_date, get_party_status, get_overdue_parties, get_collections";
-        };
+    // ─── Build request body ───────────────────────────────────────────────────
+    private ObjectNode buildRequestBody(String userMessage,
+                                        List<Map<String, Object>> history,
+                                        boolean includeTools) throws Exception {
+        ObjectNode body = mapper.createObjectNode();
+
+        ObjectNode sysInstr = mapper.createObjectNode();
+        sysInstr.set("parts", mapper.createArrayNode().add(
+            mapper.createObjectNode().put("text", buildSystemPrompt())));
+        body.set("systemInstruction", sysInstr);
+
+        ArrayNode contents = buildContentsWithHistory(userMessage, history);
+        body.set("contents", contents);
+
+        if (includeTools) body.set("tools", buildToolDefinitions());
+
+        ObjectNode genConfig = mapper.createObjectNode();
+        genConfig.put("temperature", 0.1);
+        genConfig.put("maxOutputTokens", 3000);
+        body.set("generationConfig", genConfig);
+
+        return body;
     }
 
-    private String sendFunctionResultToGemini(String originalMessage,
-                                               String funcName,
-                                               String funcResult,
-                                               List<Map<String, Object>> history) throws Exception {
-        ObjectNode requestBody = mapper.createObjectNode();
-
-        ObjectNode systemInstruction = mapper.createObjectNode();
-        ObjectNode sysPart = mapper.createObjectNode();
-        sysPart.put("text", buildSystemPrompt());
-        systemInstruction.set("parts", mapper.createArrayNode().add(sysPart));
-        requestBody.set("systemInstruction", systemInstruction);
-
+    private ArrayNode buildContentsWithHistory(String userMessage,
+                                               List<Map<String, Object>> history) {
         ArrayNode contents = mapper.createArrayNode();
-
         for (Map<String, Object> turn : history) {
             ObjectNode content = mapper.createObjectNode();
             content.put("role", (String) turn.get("role"));
             ArrayNode parts = mapper.createArrayNode();
-            ObjectNode part = mapper.createObjectNode();
-            part.put("text", (String) turn.get("text"));
-            parts.add(part);
+            parts.add(mapper.createObjectNode().put("text", (String) turn.get("text")));
             content.set("parts", parts);
             contents.add(content);
         }
-
         ObjectNode userContent = mapper.createObjectNode();
         userContent.put("role", "user");
         ArrayNode userParts = mapper.createArrayNode();
-        ObjectNode userPart = mapper.createObjectNode();
-        userPart.put("text", originalMessage);
-        userParts.add(userPart);
+        userParts.add(mapper.createObjectNode().put("text", userMessage));
         userContent.set("parts", userParts);
         contents.add(userContent);
+        return contents;
+    }
 
-        ObjectNode funcResultContent = mapper.createObjectNode();
-        funcResultContent.put("role", "model");
-        ArrayNode funcParts = mapper.createArrayNode();
-        ObjectNode funcPart = mapper.createObjectNode();
-        ObjectNode funcResponse = mapper.createObjectNode();
-        funcResponse.put("name", funcName);
-        funcResponse.set("response", mapper.createObjectNode().put("result", funcResult));
-        funcPart.set("functionResponse", funcResponse);
-        funcParts.add(funcPart);
-        funcResultContent.set("parts", funcParts);
-        contents.add(funcResultContent);
+    // ─── Execute function calls ───────────────────────────────────────────────
+    private String executeFunctionCall(String funcName, JsonNode args) {
+        String companyId = "HOTAGE INDIA";
+        return switch (funcName) {
+            case "query_table" -> {
+                // Parse filters array
+                List<Map<String, String>> filters = new ArrayList<>();
+                JsonNode filtersNode = args.path("filters");
+                if (filtersNode.isArray()) {
+                    for (JsonNode f : filtersNode) {
+                        Map<String, String> filter = new HashMap<>();
+                        filter.put("column",   f.path("column").asText(""));
+                        filter.put("operator", f.path("operator").asText("="));
+                        filter.put("value",    f.path("value").asText(""));
+                        filters.add(filter);
+                    }
+                }
+                yield erpFunctions.queryTable(
+                    args.path("table_name").asText(""),
+                    filters,
+                    args.path("select_columns").asText("all"),
+                    args.path("group_by").asText(null),
+                    args.path("order_by").asText(null),
+                    args.path("sort_direction").asText("DESC"),
+                    args.path("limit").asInt(50),
+                    companyId
+                );
+            }
+            case "get_table_schema" ->
+                erpFunctions.getTableSchema(args.path("table_name").asText("all"));
+            case "get_today_summary" ->
+                erpFunctions.getTodaySummary(companyId);
+            case "get_overdue_parties" ->
+                erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
+            default -> "Function '" + funcName + "' not found.";
+        };
+    }
 
-        requestBody.set("contents", contents);
-
-        ObjectNode genConfig = mapper.createObjectNode();
-        genConfig.put("temperature", 0.1);
-        genConfig.put("maxOutputTokens", 2048);
-        requestBody.set("generationConfig", genConfig);
-
+    // ─── HTTP call to Gemini ──────────────────────────────────────────────────
+    private String callGemini(ObjectNode body) {
         String url = apiUrl + "?key=" + apiKey;
-        String responseStr = webClient.post()
+        return webClient.post()
                 .uri(url)
                 .header("Content-Type", "application/json")
-                .bodyValue(requestBody.toString())
+                .bodyValue(body.toString())
                 .retrieve()
                 .onStatus(status -> status.is4xxClientError() || status.is5xxServerError(),
-                    clientResponse -> clientResponse.bodyToMono(String.class)
-                        .map(body -> new RuntimeException("Gemini API error " + clientResponse.statusCode() + ": " + body)))
+                    resp -> resp.bodyToMono(String.class)
+                        .map(b -> new RuntimeException("Gemini error " + resp.statusCode() + ": " + b)))
                 .bodyToMono(String.class)
                 .block();
-
-        JsonNode response = mapper.readTree(responseStr);
-        JsonNode parts = response.path("candidates").get(0).path("content").path("parts");
-        StringBuilder result = new StringBuilder();
-        for (JsonNode part : parts) {
-            if (part.has("text")) result.append(part.get("text").asText());
-        }
-        return result.toString();
     }
 }
