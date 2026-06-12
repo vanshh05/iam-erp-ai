@@ -40,13 +40,28 @@ public class ExportController {
             "contact_number", "email", "address", "outstanding_balance", "balance_type",
             "last_bill_date", "last_bill_amount", "total_business_ytd",
             "credit_limit", "overdue_days", "gstin"
+        ),
+        "ai_collection_summary", Set.of(
+            "company_id", "receipt_date", "party_name", "receipt_mode", "cheque_txn_no", "amount"
+        ),
+        "ai_payment_summary", Set.of(
+            "company_id", "payment_date", "party_name", "payment_mode", "cheque_txn_no", "amount"
+        ),
+        "ai_bank_balance", Set.of(
+            "company_id", "bank_name", "balance_type", "balance"
+        ),
+        "ai_purchase", Set.of(
+            "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
+            "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
+            "igst_amount", "invoice_amount", "taxable_amount", "payment_mode"
         )
     );
 
-    // Columns that need exact match (not LIKE)
+    // Categorical columns that need exact = match (not LIKE)
     private static final Set<String> EXACT_MATCH_COLUMNS = Set.of(
-        "party_type", "sub_party_type", "balance_type", "payment_mode",
-        "bill_no", "summary_date", "bill_date"
+        "party_type", "sub_party_type", "balance_type",
+        "payment_mode", "receipt_mode",
+        "bill_no", "summary_date", "bill_date", "receipt_date", "payment_date"
     );
 
     public ExportController(DataSource dataSource) {
@@ -117,7 +132,13 @@ public class ExportController {
             params.add(company_id);
 
             if (safeFilterCol != null && filter_val != null && !filter_val.isBlank()) {
-                if (EXACT_MATCH_COLUMNS.contains(safeFilterCol)) {
+                if (filter_val.matches("\\d{4}-\\d{2}-\\d{2},\\d{4}-\\d{2}-\\d{2}")) {
+                    // Date range: "yyyy-MM-dd,yyyy-MM-dd"
+                    String[] parts = filter_val.split(",", 2);
+                    sql.append(" AND ").append(safeFilterCol).append(" BETWEEN ? AND ?");
+                    params.add(parts[0].trim());
+                    params.add(parts[1].trim());
+                } else if (EXACT_MATCH_COLUMNS.contains(safeFilterCol)) {
                     // Exact match for categorical columns
                     sql.append(" AND ").append(safeFilterCol).append(" = ?");
                     params.add(filter_val.trim());

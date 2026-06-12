@@ -40,6 +40,20 @@ public class ErpFunctions {
             "contact_number", "email", "address", "outstanding_balance", "balance_type",
             "last_bill_date", "last_bill_amount", "total_business_ytd",
             "credit_limit", "overdue_days", "gstin"
+        ),
+        "ai_collection_summary", Set.of(
+            "company_id", "receipt_date", "party_name", "receipt_mode", "cheque_txn_no", "amount"
+        ),
+        "ai_payment_summary", Set.of(
+            "company_id", "payment_date", "party_name", "payment_mode", "cheque_txn_no", "amount"
+        ),
+        "ai_bank_balance", Set.of(
+            "company_id", "bank_name", "balance_type", "balance"
+        ),
+        "ai_purchase", Set.of(
+            "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
+            "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
+            "igst_amount", "invoice_amount", "taxable_amount", "payment_mode"
         )
     );
 
