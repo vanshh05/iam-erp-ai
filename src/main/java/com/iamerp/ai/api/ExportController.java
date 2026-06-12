@@ -23,25 +23,30 @@ public class ExportController {
     // Strict whitelist — same as ErpFunctions
     private static final Map<String, Set<String>> ALLOWED_COLUMNS = Map.of(
         "ai_daily_summary", Set.of(
-            "company_id","summary_date","total_sales","total_bills_count",
-            "total_collection","total_payment","total_receivable","total_payable",
-            "cash_sales","credit_sales","total_discount_given","total_purchase"
+            "company_id", "summary_date",
+            "total_sales", "cash_sales", "credit_sales", "total_bills_count",
+            "total_collection", "cash_collection", "bank_collection",
+            "total_payment", "cash_payment", "bank_payment",
+            "total_receivable", "total_payable", "total_discount_given",
+            "total_purchase", "cash_purchase", "credit_purchase"
         ),
         "ai_sales", Set.of(
-            "company_id","bill_no","bill_date","voucher_date","party_name",
-            "gross_amount","discount_amount","sgst_amount","cgst_amount",
-            "igst_amount","invoice_amount","taxable_amount","payment_mode","created_by"
+            "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
+            "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
+            "igst_amount", "invoice_amount", "taxable_amount", "payment_mode", "created_by"
         ),
         "ai_party_status", Set.of(
-            "company_id","party_name","party_type","contact_number","email",
-            "address","outstanding_balance","balance_type","last_bill_date",
-            "last_bill_amount","total_business_ytd","credit_limit","overdue_days","gstin"
+            "company_id", "party_name", "party_type", "sub_party_type",
+            "contact_number", "email", "address", "outstanding_balance", "balance_type",
+            "last_bill_date", "last_bill_amount", "total_business_ytd",
+            "credit_limit", "overdue_days", "gstin"
         )
     );
 
     // Columns that need exact match (not LIKE)
     private static final Set<String> EXACT_MATCH_COLUMNS = Set.of(
-        "party_type", "balance_type", "payment_mode", "bill_no", "summary_date", "bill_date"
+        "party_type", "sub_party_type", "balance_type", "payment_mode",
+        "bill_no", "summary_date", "bill_date"
     );
 
     public ExportController(DataSource dataSource) {

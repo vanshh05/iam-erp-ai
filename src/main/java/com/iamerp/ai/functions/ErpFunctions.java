@@ -23,9 +23,12 @@ public class ErpFunctions {
     // This prevents SQL injection AND stops Gemini from hallucinating column names
     private static final Map<String, Set<String>> ALLOWED_COLUMNS = Map.of(
         "ai_daily_summary", Set.of(
-            "company_id", "summary_date", "total_sales", "total_bills_count",
-            "total_collection", "total_payment", "total_receivable", "total_payable",
-            "cash_sales", "credit_sales", "total_discount_given", "total_purchase"
+            "company_id", "summary_date",
+            "total_sales", "cash_sales", "credit_sales", "total_bills_count",
+            "total_collection", "cash_collection", "bank_collection",
+            "total_payment", "cash_payment", "bank_payment",
+            "total_receivable", "total_payable", "total_discount_given",
+            "total_purchase", "cash_purchase", "credit_purchase"
         ),
         "ai_sales", Set.of(
             "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
@@ -33,9 +36,10 @@ public class ErpFunctions {
             "igst_amount", "invoice_amount", "taxable_amount", "payment_mode", "created_by"
         ),
         "ai_party_status", Set.of(
-            "company_id", "party_name", "party_type", "contact_number", "email",
-            "address", "outstanding_balance", "balance_type", "last_bill_date",
-            "last_bill_amount", "total_business_ytd", "credit_limit", "overdue_days", "gstin"
+            "company_id", "party_name", "party_type", "sub_party_type",
+            "contact_number", "email", "address", "outstanding_balance", "balance_type",
+            "last_bill_date", "last_bill_amount", "total_business_ytd",
+            "credit_limit", "overdue_days", "gstin"
         )
     );
 
