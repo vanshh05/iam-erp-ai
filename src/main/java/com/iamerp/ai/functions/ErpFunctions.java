@@ -109,9 +109,9 @@ public class ErpFunctions {
             for (String col : selectCols.split(",")) {
                 String c = col.trim().toLowerCase();
                 // Allow aggregate functions like SUM(col), COUNT(col), AVG(col)
-                if (c.matches("(sum|count|avg|min|max)\\([a-z_]+\\)")) {
-                    // Extract inner column name and validate
-                    String inner = c.replaceAll(".+\\(([a-z_]+)\\)", "$1");
+                if (c.matches("(sum|count|avg|min|max)\\(distinct [a-z_]+\\)") || c.matches("(sum|count|avg|min|max)\\([a-z_]+\\)")) {
+                    // Extract inner column name — handles COUNT(DISTINCT col) and COUNT(col)
+                    String inner = c.replaceAll(".+\\((?:distinct )?([a-z_]+)\\)", "$1");
                     if (!isValidColumn(tableName, inner) && !inner.equals("*")) {
                         return "ERROR: Column '" + inner + "' not allowed in table '" + tableName + "'";
                     }
@@ -136,7 +136,8 @@ public class ErpFunctions {
             // Allow aggregate functions in order by too
             String ob = orderBy.trim().toLowerCase();
             boolean validOrderBy = isValidColumn(tableName, ob)
-                || ob.matches("(sum|count|avg|min|max)\\([a-z_*]+\\)");
+                || ob.matches("(sum|count|avg|min|max)\\([a-z_*]+\\)")
+                || ob.matches("(sum|count|avg|min|max)\\(distinct [a-z_]+\\)");
             if (!validOrderBy) {
                 return "ERROR: Cannot sort by '" + orderBy + "' — column not found in '" + tableName + "'";
             }
