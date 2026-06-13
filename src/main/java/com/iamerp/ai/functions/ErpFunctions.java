@@ -47,7 +47,7 @@ public class ErpFunctions {
         "ai_payment_summary", Set.of(
             "company_id", "payment_date", "party_name", "payment_mode", "cheque_txn_no", "amount"
         ),
-        "ai_bank_balance", Set.of(
+        "ai_bank_balance_summary", Set.of(
             "company_id", "bank_name", "balance_type", "balance"
         ),
         "ai_purchase", Set.of(

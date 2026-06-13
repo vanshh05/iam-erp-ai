@@ -92,7 +92,7 @@ public class GeminiService {
              + "  cheque_txn_no  ← cheque or transaction number\n"
              + "  amount DECIMAL ← amount paid\n"
              + "\n"
-             + "TABLE: ai_bank_balance  — current bank/finance account balances\n"
+             + "TABLE: ai_bank_balance_summary  — current bank/finance account balances\n"
              + "  bank_name      ← full account name e.g. 'HDFC Bank- CC-50200032245968 (01766)'\n"
              + "  balance_type   ← 'Debit', 'Credit', or NULL\n"
              + "  balance DECIMAL← current balance (0.00 if NULL balance_type means zero)\n"
@@ -130,8 +130,8 @@ public class GeminiService {
              + "  → 'purchase from Raj Traders' → ai_purchase, filter party_name LIKE 'Raj'\n"
              + "\n"
              + "BANK BALANCE:\n"
-             + "  → ai_bank_balance, filter bank_name LIKE 'HDFC' for a specific bank\n"
-             + "  → 'all bank balances' → ai_bank_balance, no filter, order_by balance DESC\n"
+             + "  → ai_bank_balance_summary, filter bank_name LIKE 'HDFC' for a specific bank\n"
+             + "  → 'all bank balances' → ai_bank_balance_summary, no filter, order_by balance DESC\n"
              + "  → balance_type 'Credit' = bank owes us (positive), 'Debit' = we owe bank (overdraft/loan)\n"
              + "\n"
              + "DATE FILTERING RULES:\n"
@@ -159,7 +159,7 @@ public class GeminiService {
              + "  Individual purchase bill / by party   → ai_purchase\n"
              + "  Individual receipt / who paid us      → ai_collection_summary\n"
              + "  Individual payment / who we paid      → ai_payment_summary\n"
-             + "  Bank balance / account balance        → ai_bank_balance\n"
+             + "  Bank balance / account balance        → ai_bank_balance_summary\n"
              + "  Party details / contact / GSTIN       → ai_party_status\n"
              + "\n"
              + "FILTER OPERATORS:\n"
@@ -176,7 +176,7 @@ public class GeminiService {
              + "  Combine with group_by for breakdowns e.g. group_by=receipt_mode for cash vs bank split\n"
              + "\n"
              + "ALWAYS use select_columns='all' for ai_party_status queries.\n"
-             + "For ai_bank_balance, always fetch all columns — it's a small table.\n"
+             + "For ai_bank_balance_summary, always fetch all columns — it's a small table.\n"
              + "\n"
              + "=== DATE REFERENCE ===\n"
              + "Today           = " + todayStr + " (" + todayIso + ")\n"
@@ -193,7 +193,7 @@ public class GeminiService {
              + "Examples:\n"
              + "  All suppliers:          {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Supplier\",\"order_by\":\"party_name\",\"label\":\"All Suppliers\"}\n"
              + "  All parties:            {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"party_name\",\"label\":\"All Parties\"}\n"
-             + "  All bank balances:      {\"__export__\":true,\"table\":\"ai_bank_balance\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"balance\",\"label\":\"All Bank Balances\"}\n"
+             + "  All bank balances:      {\"__export__\":true,\"table\":\"ai_bank_balance_summary\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"balance\",\"label\":\"All Bank Balances\"}\n"
              + "  All collections April:  {\"__export__\":true,\"table\":\"ai_collection_summary\",\"filter_col\":\"receipt_date\",\"filter_val\":\"2026-04-01,2026-04-30\",\"order_by\":\"receipt_date\",\"label\":\"Collections April 2026\"}\n"
              + "  All payments April:     {\"__export__\":true,\"table\":\"ai_payment_summary\",\"filter_col\":\"payment_date\",\"filter_val\":\"2026-04-01,2026-04-30\",\"order_by\":\"payment_date\",\"label\":\"Payments April 2026\"}\n"
              + "  All purchase bills:     {\"__export__\":true,\"table\":\"ai_purchase\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"bill_date\",\"label\":\"All Purchase Bills\"}\n"
@@ -245,7 +245,7 @@ public class GeminiService {
                   "properties": {
                     "table_name": {
                       "type": "string",
-                      "description": "Table to query. Must be one of: ai_daily_summary, ai_sales, ai_purchase, ai_collection_summary, ai_payment_summary, ai_bank_balance, ai_party_status"
+                      "description": "Table to query. Must be one of: ai_daily_summary, ai_sales, ai_purchase, ai_collection_summary, ai_payment_summary, ai_bank_balance_summary, ai_party_status"
                     },
                     "filters": {
                       "type": "array",
@@ -286,7 +286,7 @@ public class GeminiService {
               },
               {
                 "name": "get_table_schema",
-                "description": "Get the exact column names available in a table. Call this if you are unsure of a column name before running query_table. Pass 'all' to see all 7 tables. Available tables: ai_daily_summary, ai_sales, ai_purchase, ai_collection_summary, ai_payment_summary, ai_bank_balance, ai_party_status",
+                "description": "Get the exact column names available in a table. Call this if you are unsure of a column name before running query_table. Pass 'all' to see all 7 tables. Available tables: ai_daily_summary, ai_sales, ai_purchase, ai_collection_summary, ai_payment_summary, ai_bank_balance_summary, ai_party_status",
                 "parameters": {
                   "type": "object",
                   "properties": {
