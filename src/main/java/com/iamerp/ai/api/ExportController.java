@@ -84,7 +84,7 @@ public class ExportController {
             @RequestParam(required = false) String filter_col,
             @RequestParam(required = false) String filter_val,
             @RequestParam(required = false) String order_by,
-            @RequestParam(defaultValue = "ASC") String sort_dir,
+            @RequestParam(defaultValue = "DESC") String sort_dir,
             @RequestParam(defaultValue = "5000") int limit
     ) {
         Map<String, Object> response = new HashMap<>();
