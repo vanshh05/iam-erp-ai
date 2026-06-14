@@ -401,7 +401,7 @@ public class GeminiService {
         for (JsonNode part : parts) {
             if (part.has("functionCall")) {
                 toolCalls.add(part.get("functionCall"));
-                log.info("[Gemini] Tool call: {} | args: {}", 
+                log.info("[Gemini] Tool call: {} | args: {}",
                     part.get("functionCall").path("name").asText(),
                     part.get("functionCall").path("args").toString());
             } else if (part.has("text")) {
@@ -409,7 +409,7 @@ public class GeminiService {
             }
         }
 
-        // No tool calls — return whatever text we have
+        // No tool calls — return text directly
         if (toolCalls.isEmpty()) {
             String text = textParts.toString().trim();
             if (text.isEmpty() && depth > 0) {
@@ -418,10 +418,10 @@ public class GeminiService {
             return text;
         }
 
-        // Build conversation with tool calls + results
+        // Execute all tool calls, collect results
         ArrayNode contents = buildContentsWithHistory(originalMessage, history);
 
-        // Turn 1: model's tool call
+        // Model turn — the tool call(s)
         ObjectNode modelTurn = mapper.createObjectNode();
         modelTurn.put("role", "model");
         ArrayNode modelParts = mapper.createArrayNode();
@@ -433,21 +433,51 @@ public class GeminiService {
         modelTurn.set("parts", modelParts);
         contents.add(modelTurn);
 
-        // Turn 2: tool results
+        // Execute tools and collect raw results
+        List<String> rawResults = new ArrayList<>();
         ObjectNode resultTurn = mapper.createObjectNode();
         resultTurn.put("role", "user");
         ArrayNode resultParts = mapper.createArrayNode();
+
         for (JsonNode tc : toolCalls) {
             String funcName = tc.get("name").asText();
             String result   = executeFunctionCall(funcName, tc.path("args"));
-            log.info("[Gemini] Result for {}: {}", funcName,
-                result.length() > 200 ? result.substring(0, 200) + "..." : result);
+            rawResults.add(result);
+            log.info("[Gemini] Result for {}: rows={}, size={}chars", funcName,
+                result.contains("row_count") ? result.replaceAll(".*\"row_count\":(\\d+).*", "$1") : "?",
+                result.length());
+
+            // If result is large JSON data, pass a trimmed version to Gemini
+            // but keep the full result for direct rendering
+            String resultForGemini = result;
+            if (result.startsWith("{") && result.contains("\"data\"")) {
+                try {
+                    JsonNode parsed = mapper.readTree(result);
+                    int rowCount = parsed.path("row_count").asInt(0);
+                    // If more than 15 rows, only send first 5 rows to Gemini
+                    // and instruct it to format based on those (it will produce the right headers)
+                    if (rowCount > 15) {
+                        JsonNode dataArr = parsed.path("data");
+                        ObjectNode trimmed = mapper.createObjectNode();
+                        trimmed.put("table", parsed.path("table").asText());
+                        trimmed.put("row_count", rowCount);
+                        trimmed.put("note", "ONLY FIRST 5 ROWS SHOWN BELOW. Produce the markdown table with correct headers and these rows. State total rows = " + rowCount + " at the top.");
+                        ArrayNode first5 = mapper.createArrayNode();
+                        for (int i = 0; i < Math.min(5, dataArr.size()); i++) first5.add(dataArr.get(i));
+                        trimmed.set("data", first5);
+                        resultForGemini = trimmed.toString();
+                        log.info("[Gemini] Trimmed result from {} to 5 rows for Gemini formatting", rowCount);
+                    }
+                } catch (Exception e) {
+                    // keep original if parse fails
+                }
+            }
 
             ObjectNode fp = mapper.createObjectNode();
             ObjectNode fr = mapper.createObjectNode();
             fr.put("name", funcName);
             ObjectNode responseNode = mapper.createObjectNode();
-            responseNode.put("result", result);
+            responseNode.put("result", resultForGemini);
             fr.set("response", responseNode);
             fp.set("functionResponse", fr);
             resultParts.add(fp);
@@ -455,7 +485,7 @@ public class GeminiService {
         resultTurn.set("parts", resultParts);
         contents.add(resultTurn);
 
-        // Follow-up: NO tools — forces Gemini to write the final answer
+        // Follow-up — NO tools, forces Gemini to write the final text answer
         ObjectNode followUp = mapper.createObjectNode();
         ObjectNode sys = mapper.createObjectNode();
         sys.set("parts", mapper.createArrayNode().add(
@@ -466,9 +496,8 @@ public class GeminiService {
         cfg.put("temperature", 0.1);
         cfg.put("maxOutputTokens", 65536);
         followUp.set("generationConfig", cfg);
-        // NOTE: tools intentionally omitted — Gemini must now write the response
 
-        String followUpStr = callGemini(followUp);
+        String followUpStr  = callGemini(followUp);
         JsonNode followUpJson = mapper.readTree(followUpStr);
         return processResponse(followUpJson, originalMessage, history, depth + 1);
     }
