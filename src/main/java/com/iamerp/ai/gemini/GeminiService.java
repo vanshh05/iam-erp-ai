@@ -66,7 +66,7 @@ public class GeminiService {
              + "  bill_no, bill_date DATE, voucher_date TIME, party_name\n"
              + "  gross_amount, discount_amount, taxable_amount\n"
              + "  sgst_amount, cgst_amount, igst_amount\n"
-             + "  invoice_amount (final bill value), payment_mode (Cash/Credit), created_by\n"
+             + "  invoice_amount (final bill value), payment_mode (Cash/Credit)\n"
              + "\n"
              + "TABLE: ai_purchase  — individual purchase bills\n"
              + "  bill_no, bill_date DATE, voucher_date TIME, party_name\n"
@@ -101,7 +101,7 @@ public class GeminiService {
              + "\n"
              + "=== MANDATORY COLUMN ORDER FOR UI DISPLAY ===\n"
              + "ALWAYS use these exact select_columns for each table:\n"
-             + "ai_sales: party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode,created_by\n"
+             + "ai_sales: party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode\n"
              + "ai_purchase: party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode\n"
              + "ai_party_status: party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin\n"
              + "ai_collection_summary: receipt_date,party_name,amount,receipt_mode,cheque_txn_no\n"
@@ -196,7 +196,7 @@ public class GeminiService {
                     },
                     "select_columns": {
                       "type": "string",
-                      "description": "Comma-separated columns in mandatory display order. ai_sales=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode,created_by | ai_purchase=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode | ai_party_status=party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin | ai_collection_summary=receipt_date,party_name,amount,receipt_mode,cheque_txn_no | ai_payment_summary=payment_date,party_name,amount,payment_mode,cheque_txn_no | ai_bank_balance_summary=bank_name,balance_type,balance. For aggregations use SUM(col) or COUNT(DISTINCT col)."
+                      "description": "Comma-separated columns in mandatory display order. ai_sales=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode | ai_purchase=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode | ai_party_status=party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin | ai_collection_summary=receipt_date,party_name,amount,receipt_mode,cheque_txn_no | ai_payment_summary=payment_date,party_name,amount,payment_mode,cheque_txn_no | ai_bank_balance_summary=bank_name,balance_type,balance. For aggregations use SUM(col) or COUNT(DISTINCT col)."
                     },
                     "group_by":        { "type": "string", "description": "Column to group by. Optional." },
                     "order_by":        { "type": "string", "description": "Column to sort by. Optional." },

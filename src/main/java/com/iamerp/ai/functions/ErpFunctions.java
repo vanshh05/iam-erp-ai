@@ -33,7 +33,7 @@ public class ErpFunctions {
         "ai_sales", Set.of(
             "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
             "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
-            "igst_amount", "invoice_amount", "taxable_amount", "payment_mode", "created_by"
+            "igst_amount", "invoice_amount", "taxable_amount", "payment_mode"
         ),
         "ai_party_status", Set.of(
             "company_id", "party_name", "party_type", "sub_party_type",
