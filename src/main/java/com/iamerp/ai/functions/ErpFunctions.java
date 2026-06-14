@@ -126,7 +126,7 @@ public class ErpFunctions {
         }
 
         // Validate limit
-        int safeLimit = Math.min(Math.max(limit <= 0 ? 200 : limit, 1), 2000);
+        int safeLimit = Math.min(Math.max(limit <= 0 ? 2000 : limit, 1), 2000);
 
         // Validate sort
         String safeSortDir = ALLOWED_SORT_DIRECTIONS.contains(

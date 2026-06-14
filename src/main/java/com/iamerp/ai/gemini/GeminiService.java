@@ -162,13 +162,15 @@ public class GeminiService {
              + "\n"
              + "=== LARGE DATA HANDLING ===\n"
              + "When user asks for 'all parties', 'all suppliers', 'all customers', 'complete list',\n"
-             + "'all debtors', 'all creditors', 'all collections', 'all payments', 'all purchases',\n"
-             + "'all bank balances', 'total receivable list', 'total payable list' — respond ONLY with:\n"
+             + "'all debtors', 'all creditors', 'debtors list', 'creditors list',\n"
+             + "'all collections', 'all payments', 'all purchases', 'all bank balances',\n"
+             + "'total receivable list', 'total payable list' — respond ONLY with this JSON, nothing else:\n"
              + "{\"__export__\":true,\"table\":\"TABLE_NAME\",\"filter_col\":\"COL_OR_EMPTY\",\"filter_val\":\"VAL_OR_EMPTY\",\"order_by\":\"COL_OR_EMPTY\",\"label\":\"DESCRIPTION\"}\n"
              + "Examples:\n"
-             + "  All debtors (customers):   {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Customer\",\"order_by\":\"outstanding_balance\",\"label\":\"All Debtors (Customers)\"}\n"
-             + "  All creditors (suppliers): {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Supplier\",\"order_by\":\"outstanding_balance\",\"label\":\"All Creditors (Suppliers)\"}\n"
-             + "  All suppliers:             {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Supplier\",\"order_by\":\"party_name\",\"label\":\"All Suppliers\"}\n"
+             + "  All debtors:               {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Customer\",\"order_by\":\"outstanding_balance\",\"label\":\"All Debtors (Customers)\"}\n"
+             + "  All creditors:             {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Supplier\",\"order_by\":\"outstanding_balance\",\"label\":\"All Creditors (Suppliers)\"}\n"
+             + "  All suppliers:             {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Supplier\",\"order_by\":\"party_name\",\"label\":\"All Creditors (Suppliers)\"}\n"
+             + "  All customers:             {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Customer\",\"order_by\":\"party_name\",\"label\":\"All Debtors (Customers)\"}\n"
              + "  All bank balances:         {\"__export__\":true,\"table\":\"ai_bank_balance_summary\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"balance\",\"label\":\"All Bank Balances\"}\n"
              + "  All collections April:     {\"__export__\":true,\"table\":\"ai_collection_summary\",\"filter_col\":\"receipt_date\",\"filter_val\":\"2026-04-01,2026-04-30\",\"order_by\":\"receipt_date\",\"label\":\"Collections April 2026\"}\n"
              + "\n"
@@ -461,7 +463,7 @@ public class GeminiService {
                     args.path("group_by").asText(null),
                     args.path("order_by").asText(null),
                     args.path("sort_direction").asText("DESC"),
-                    args.path("limit").asInt(200),
+                    args.path("limit").asInt(2000),
                     companyId
                 );
             }

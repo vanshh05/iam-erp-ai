@@ -85,12 +85,28 @@ public class ExportController {
             @RequestParam(required = false) String filter_val,
             @RequestParam(required = false) String order_by,
             @RequestParam(defaultValue = "DESC") String sort_dir,
-            @RequestParam(defaultValue = "5000") int limit
+            @RequestParam(defaultValue = "5000") int limit,
+            @RequestParam(required = false) String select_cols  // optional: comma-separated columns to SELECT
     ) {
         Map<String, Object> response = new HashMap<>();
 
-        log.info("[Export] table={} company_id='{}' filter_col={} filter_val={} order_by={} limit={}",
-                 table, company_id, filter_col, filter_val, order_by, limit);
+        log.info("[Export] table={} company_id='{}' filter_col={} filter_val={} order_by={} select_cols={} limit={}",
+                 table, company_id, filter_col, filter_val, order_by, select_cols, limit);
+
+        // Build SELECT clause — use explicit columns if provided, else SELECT *
+        String selectClause = "*";
+        if (select_cols != null && !select_cols.isBlank()) {
+            List<String> validCols = new ArrayList<>();
+            for (String col : select_cols.split(",")) {
+                String c = col.trim().toLowerCase();
+                if (ALLOWED_COLUMNS.get(table) != null && ALLOWED_COLUMNS.get(table).contains(c)) {
+                    validCols.add(c);
+                }
+            }
+            if (!validCols.isEmpty()) {
+                selectClause = "company_id," + String.join(",", validCols); // always include company_id for reference
+            }
+        }
 
         // Validate table
         if (!ALLOWED_COLUMNS.containsKey(table)) {
@@ -125,8 +141,8 @@ public class ExportController {
         try (Connection conn = dataSource.getConnection()) {
 
             // Build query
-            StringBuilder sql = new StringBuilder("SELECT * FROM ")
-                .append(table).append(" WHERE company_id = ?");
+            StringBuilder sql = new StringBuilder("SELECT ").append(selectClause)
+                .append(" FROM ").append(table).append(" WHERE company_id = ?");
 
             List<Object> params = new ArrayList<>();
             params.add(company_id);
