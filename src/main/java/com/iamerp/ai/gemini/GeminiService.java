@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.*;
 import com.iamerp.ai.functions.ErpFunctions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -19,6 +21,7 @@ public class GeminiService {
     @Value("${gemini.api.url}")
     private String apiUrl;
 
+    private static final Logger log = LoggerFactory.getLogger(GeminiService.class);
     private final ErpFunctions erpFunctions;
     private final ObjectMapper mapper = new ObjectMapper();
     private final WebClient webClient = WebClient.builder()
@@ -378,32 +381,50 @@ public class GeminiService {
                                    String originalMessage,
                                    List<Map<String, Object>> history,
                                    int depth) throws Exception {
-        if (depth > 3) return "Maximum tool call depth reached.";
+        if (depth > 5) return "Maximum tool call depth reached.";
 
         JsonNode candidates = response.path("candidates");
-        if (candidates.isEmpty()) return "No response from Gemini.";
+        if (candidates.isEmpty()) {
+            // Log full response for debugging
+            log.error("[Gemini] No candidates in response: {}", response.toString().substring(0, Math.min(500, response.toString().length())));
+            return "No response from Gemini.";
+        }
 
-        JsonNode content = candidates.get(0).path("content");
-        JsonNode parts   = content.path("parts");
+        JsonNode candidate = candidates.get(0);
+        JsonNode content   = candidate.path("content");
+        JsonNode parts     = content.path("parts");
+        String finishReason = candidate.path("finishReason").asText("");
 
-        // Collect any text parts first
+        log.info("[Gemini] depth={} finishReason={} parts={}", depth, finishReason, parts.size());
+
+        // Collect text and tool calls
         StringBuilder textParts = new StringBuilder();
         List<JsonNode> toolCalls = new ArrayList<>();
 
         for (JsonNode part : parts) {
             if (part.has("functionCall")) {
                 toolCalls.add(part.get("functionCall"));
+                log.info("[Gemini] Tool call: {} args={}", part.get("functionCall").path("name").asText(), part.get("functionCall").path("args").toString());
             } else if (part.has("text")) {
                 textParts.append(part.get("text").asText());
             }
         }
 
-        // If no tool calls, return the text
+        // If no tool calls, return the text (even if empty, handle gracefully)
         if (toolCalls.isEmpty()) {
-            return textParts.toString();
+            String text = textParts.toString().trim();
+            if (text.isEmpty()) {
+                log.warn("[Gemini] Empty text response at depth={} finishReason={}", depth, finishReason);
+                // If Gemini returned nothing after a tool call, it likely means no data was found
+                if (depth > 0) {
+                    return "No data found for the requested query. Please check your filters or try a different date/period.";
+                }
+                return "I could not generate a response. Please rephrase your question.";
+            }
+            return text;
         }
 
-        // Execute all tool calls and build function response turn
+        // Execute all tool calls
         ArrayNode contentsWithTools = buildContentsWithHistory(originalMessage, history);
 
         // Add the model's function call turn
@@ -418,7 +439,7 @@ public class GeminiService {
         modelTurn.set("parts", modelParts);
         contentsWithTools.add(modelTurn);
 
-        // Add function results turn
+        // Execute and build function result turn
         ObjectNode funcResultTurn = mapper.createObjectNode();
         funcResultTurn.put("role", "user");
         ArrayNode funcResultParts = mapper.createArrayNode();
@@ -426,6 +447,9 @@ public class GeminiService {
             String funcName = tc.get("name").asText();
             JsonNode args   = tc.path("args");
             String result   = executeFunctionCall(funcName, args);
+
+            log.info("[Gemini] Tool result for {}: {}", funcName,
+                result.length() > 300 ? result.substring(0, 300) + "..." : result);
 
             ObjectNode fp = mapper.createObjectNode();
             ObjectNode fr = mapper.createObjectNode();
@@ -439,13 +463,14 @@ public class GeminiService {
         funcResultTurn.set("parts", funcResultParts);
         contentsWithTools.add(funcResultTurn);
 
-        // Build follow-up request with tool results
+        // Follow-up call with tool results — include tools so Gemini can chain if needed
         ObjectNode followUpBody = mapper.createObjectNode();
         ObjectNode sysInstr = mapper.createObjectNode();
         sysInstr.set("parts", mapper.createArrayNode().add(
             mapper.createObjectNode().put("text", buildSystemPrompt())));
         followUpBody.set("systemInstruction", sysInstr);
         followUpBody.set("contents", contentsWithTools);
+        followUpBody.set("tools", buildToolDefinitions());  // keep tools available for chaining
         ObjectNode genConfig = mapper.createObjectNode();
         genConfig.put("temperature", 0.1);
         genConfig.put("maxOutputTokens", 65536);
@@ -454,7 +479,6 @@ public class GeminiService {
         String followUpStr = callGemini(followUpBody);
         JsonNode followUp  = mapper.readTree(followUpStr);
 
-        // Recurse in case Gemini wants to make another tool call
         return processResponse(followUp, originalMessage, history, depth + 1);
     }
 
