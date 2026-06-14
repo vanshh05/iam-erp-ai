@@ -292,15 +292,7 @@ public class GeminiService {
                     },
                     "select_columns": {
                       "type": "string",
-                      "description": "Comma-separated column names in the EXACT display order you want. "
-                        + "MANDATORY ORDERS (never deviate): "
-                        + "ai_sales: party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode,created_by | "
-                        + "ai_purchase: party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode | "
-                        + "ai_party_status: party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin | "
-                        + "ai_collection_summary: receipt_date,party_name,amount,receipt_mode,cheque_txn_no | "
-                        + "ai_payment_summary: payment_date,party_name,amount,payment_mode,cheque_txn_no | "
-                        + "ai_bank_balance_summary: bank_name,balance_type,balance | "
-                        + "For aggregation queries only, you may use SUM(col), COUNT(DISTINCT col) etc."
+                      "description": "Comma-separated column names in the EXACT display order. MANDATORY ORDERS: ai_sales=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode,created_by | ai_purchase=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode | ai_party_status=party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin | ai_collection_summary=receipt_date,party_name,amount,receipt_mode,cheque_txn_no | ai_payment_summary=payment_date,party_name,amount,payment_mode,cheque_txn_no | ai_bank_balance_summary=bank_name,balance_type,balance. For aggregations use SUM(col) or COUNT(DISTINCT col)."
                     },
                     "group_by": {
                       "type": "string",
