@@ -15,13 +15,14 @@ import java.util.*;
 @Service
 public class GeminiService {
 
+    private static final Logger log = LoggerFactory.getLogger(GeminiService.class);
+
     @Value("${gemini.api.key}")
     private String apiKey;
 
     @Value("${gemini.api.url}")
     private String apiUrl;
 
-    private static final Logger log = LoggerFactory.getLogger(GeminiService.class);
     private final ErpFunctions erpFunctions;
     private final ObjectMapper mapper = new ObjectMapper();
     private final WebClient webClient = WebClient.builder()
@@ -35,231 +36,131 @@ public class GeminiService {
     // ─── System Prompt ────────────────────────────────────────────────────────
     private String buildSystemPrompt() {
         java.time.LocalDate today = java.time.LocalDate.now();
-        String todayStr     = today.format(java.time.format.DateTimeFormatter.ofPattern("dd MMMM yyyy"));
-        String todayIso     = today.toString();
-        String currentMonth = today.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"));
-        String monthStart   = today.withDayOfMonth(1).toString();
-        String monthEnd     = today.toString();
+        String todayStr      = today.format(java.time.format.DateTimeFormatter.ofPattern("dd MMMM yyyy"));
+        String todayIso      = today.toString();
+        String monthStart    = today.withDayOfMonth(1).toString();
         String prevMonthStart = today.minusMonths(1).withDayOfMonth(1).toString();
-        String prevMonthEnd   = today.minusMonths(1)
-                                     .withDayOfMonth(today.minusMonths(1).lengthOfMonth()).toString();
-        String yearStart    = today.withDayOfMonth(1).withMonth(1).toString();
-        int    fy_start_yr  = today.getMonthValue() >= 4 ? today.getYear() : today.getYear() - 1;
-        String fyStart      = fy_start_yr + "-04-01";
-        String fyEnd        = (fy_start_yr + 1) + "-03-31";
+        String prevMonthEnd   = today.minusMonths(1).withDayOfMonth(today.minusMonths(1).lengthOfMonth()).toString();
+        int    fy_start_yr   = today.getMonthValue() >= 4 ? today.getYear() : today.getYear() - 1;
+        String fyStart       = fy_start_yr + "-04-01";
+        String fyEnd         = (fy_start_yr + 1) + "-03-31";
 
         return "You are a strict ERP data assistant for Ayaam ERP by Datawheel Software Technology LLP.\n"
              + "Your ONLY job is to fetch and present ERP data EXACTLY as returned by the tools.\n\n"
              + "=== DATABASE SCHEMA (7 TABLES) ===\n"
              + "\n"
-             + "TABLE: ai_daily_summary  — pre-aggregated daily totals, fastest for date-based summaries\n"
+             + "TABLE: ai_daily_summary  — pre-aggregated daily totals\n"
              + "  summary_date DATE\n"
              + "  total_sales, cash_sales, credit_sales DECIMAL\n"
              + "  total_bills_count INT\n"
-             + "  total_collection DECIMAL    ← total receipts from customers (cash_collection + bank_collection)\n"
-             + "  cash_collection DECIMAL     ← cash receipts\n"
-             + "  bank_collection DECIMAL     ← bank/online receipts\n"
-             + "  total_payment DECIMAL       ← total payments to suppliers (cash_payment + bank_payment)\n"
-             + "  cash_payment DECIMAL        ← cash payments made\n"
-             + "  bank_payment DECIMAL        ← bank/online payments made\n"
+             + "  total_collection DECIMAL    ← total receipts (cash_collection + bank_collection)\n"
+             + "  cash_collection DECIMAL, bank_collection DECIMAL\n"
+             + "  total_payment DECIMAL       ← total payments out (cash_payment + bank_payment)\n"
+             + "  cash_payment DECIMAL, bank_payment DECIMAL\n"
              + "  total_receivable DECIMAL, total_payable DECIMAL\n"
              + "  total_discount_given DECIMAL\n"
              + "  total_purchase DECIMAL      ← total purchase (cash_purchase + credit_purchase)\n"
              + "  cash_purchase DECIMAL, credit_purchase DECIMAL\n"
              + "\n"
-             + "TABLE: ai_sales  — individual sales bills/invoices\n"
-             + "  bill_no VARCHAR, bill_date DATE, voucher_date TIME, party_name\n"
-             + "  gross_amount, discount_amount\n"
-             + "  sgst_amount, cgst_amount, igst_amount  ← GST breakdown\n"
-             + "  invoice_amount  ← final bill value (use this for bill totals)\n"
-             + "  taxable_amount, payment_mode (Cash/Credit), created_by\n"
-             + "\n"
-             + "TABLE: ai_purchase  — individual purchase bills (same structure as ai_sales)\n"
-             + "  bill_no VARCHAR, bill_date DATE, voucher_date TIME, party_name\n"
-             + "  gross_amount, discount_amount\n"
+             + "TABLE: ai_sales  — individual sales bills\n"
+             + "  bill_no, bill_date DATE, voucher_date TIME, party_name\n"
+             + "  gross_amount, discount_amount, taxable_amount\n"
              + "  sgst_amount, cgst_amount, igst_amount\n"
-             + "  invoice_amount  ← final purchase bill value\n"
-             + "  taxable_amount, payment_mode (Cash/Credit)\n"
+             + "  invoice_amount (final bill value), payment_mode (Cash/Credit), created_by\n"
              + "\n"
-             + "TABLE: ai_collection_summary  — individual collection/receipt transactions\n"
-             + "  receipt_date DATE\n"
-             + "  party_name     ← who paid\n"
-             + "  receipt_mode   ← 'Bank' or 'Cash'\n"
-             + "  cheque_txn_no  ← cheque or transaction number\n"
-             + "  amount DECIMAL ← amount received\n"
+             + "TABLE: ai_purchase  — individual purchase bills\n"
+             + "  bill_no, bill_date DATE, voucher_date TIME, party_name\n"
+             + "  gross_amount, discount_amount, taxable_amount\n"
+             + "  sgst_amount, cgst_amount, igst_amount\n"
+             + "  invoice_amount, payment_mode (Cash/Credit)\n"
+             + "\n"
+             + "TABLE: ai_collection_summary  — individual receipt transactions\n"
+             + "  receipt_date DATE, party_name, receipt_mode (Bank/Cash), cheque_txn_no, amount\n"
              + "\n"
              + "TABLE: ai_payment_summary  — individual payment transactions\n"
-             + "  payment_date DATE\n"
-             + "  party_name     ← who was paid\n"
-             + "  payment_mode   ← 'Bank' or 'Cash'\n"
-             + "  cheque_txn_no  ← cheque or transaction number\n"
-             + "  amount DECIMAL ← amount paid\n"
+             + "  payment_date DATE, party_name, payment_mode (Bank/Cash), cheque_txn_no, amount\n"
              + "\n"
-             + "TABLE: ai_bank_balance_summary  — current bank/finance account balances\n"
-             + "  bank_name      ← full account name e.g. 'HDFC Bank- CC-50200032245968 (01766)'\n"
-             + "  balance_type   ← 'Debit', 'Credit', or NULL\n"
-             + "  balance DECIMAL← current balance (0.00 if NULL balance_type means zero)\n"
+             + "TABLE: ai_bank_balance_summary  — bank/finance account balances\n"
+             + "  bank_name, balance_type (Debit/Credit/NULL), balance DECIMAL\n"
              + "\n"
-             + "TABLE: ai_party_status  — customer/supplier master data\n"
-             + "  party_name, party_type ('Customer'/'Supplier'), sub_party_type ('Buyer'/'Dealer'/etc)\n"
+             + "TABLE: ai_party_status  — customer/supplier master\n"
+             + "  party_name, party_type (Customer/Supplier), sub_party_type (Buyer/Dealer/etc)\n"
              + "  contact_number, email, address, gstin\n"
              + "  outstanding_balance, balance_type (DR=they owe us / CR=we owe them)\n"
              + "  last_bill_date, last_bill_amount, total_business_ytd, credit_limit, overdue_days\n"
              + "\n"
              + "=== CRITICAL COLUMN RULES ===\n"
-             + "COLLECTIONS (money IN):\n"
-             + "  For daily totals  → ai_daily_summary: total_collection / cash_collection / bank_collection\n"
-             + "  For individual txn → ai_collection_summary: amount, receipt_mode, receipt_date, party_name, cheque_txn_no\n"
-             + "  → 'collections from Raj Traders' → ai_collection_summary, filter party_name LIKE 'Raj'\n"
-             + "  → 'bank collection on 1st June' → ai_collection_summary, filter receipt_date=date AND receipt_mode='Bank'\n"
-             + "  → 'total collection this week' → ai_daily_summary, filter summary_date BETWEEN dates, SUM(total_collection)\n"
-             + "\n"
-             + "PAYMENTS (money OUT):\n"
-             + "  For daily totals  → ai_daily_summary: total_payment / cash_payment / bank_payment\n"
-             + "  For individual txn → ai_payment_summary: amount, payment_mode, payment_date, party_name, cheque_txn_no\n"
-             + "  → 'payments to Raj Traders' → ai_payment_summary, filter party_name LIKE 'Raj'\n"
-             + "  → 'cash payments in April' → ai_payment_summary, filter payment_date BETWEEN dates AND payment_mode='Cash'\n"
-             + "  NEVER confuse payment with collection\n"
-             + "\n"
-             + "SALES:\n"
-             + "  For daily totals → ai_daily_summary: total_sales / cash_sales / credit_sales\n"
-             + "  For individual bills → ai_sales: invoice_amount, bill_no, bill_date, party_name, payment_mode\n"
-             + "  → 'sales bill of Raj Traders' → ai_sales, filter party_name LIKE 'Raj'\n"
-             + "  → 'bill number GST-001' → ai_sales, filter bill_no='GST-001'\n"
-             + "\n"
-             + "PURCHASE:\n"
-             + "  For daily totals → ai_daily_summary: total_purchase / cash_purchase / credit_purchase\n"
-             + "  For individual bills → ai_purchase: invoice_amount, bill_no, bill_date, party_name, payment_mode\n"
-             + "  → 'purchase from Raj Traders' → ai_purchase, filter party_name LIKE 'Raj'\n"
-             + "\n"
-             + "BANK BALANCE:\n"
-             + "  → ai_bank_balance_summary, filter bank_name LIKE 'HDFC' for a specific bank\n"
-             + "  → 'all bank balances' → ai_bank_balance_summary, no filter, order_by balance DESC\n"
-             + "  → balance_type 'Credit' = bank owes us (positive), 'Debit' = we owe bank (overdraft/loan)\n"
-             + "\n"
-             + "DATE FILTERING RULES:\n"
-             + "  → 'today' → filter date_col = TODAY\n"
-             + "  → 'this week' → filter date_col BETWEEN (today-7 days) AND today\n"
-             + "  → 'this month' → filter date_col BETWEEN (first of month) AND today\n"
-             + "  → 'last month' → filter date_col BETWEEN (first of last month) AND (last of last month)\n"
-             + "  → 'in April' / 'April 2026' → filter date_col BETWEEN 2026-04-01 AND 2026-04-30\n"
-             + "  → 'financial year' → filter date_col BETWEEN FY_START AND FY_END\n"
-             + "  Use the correct date column per table: summary_date, bill_date, receipt_date, payment_date\n"
-             + "\n"
-             + "PARTY TYPE:\n"
-             + "  party_type = 'Customer' or 'Supplier'\n"
-             + "  sub_party_type = 'Buyer', 'Dealer', 'Supplier' etc.\n"
-             + "\n"
-             + "=== HOW TO USE TOOLS ===\n"
-             + "PRIMARY TOOL: query_table — use for all data retrieval.\n"
-             + "SECONDARY: get_table_schema — call first if unsure of column names.\n"
-             + "CONVENIENCE: get_today_summary, get_overdue_parties — for those specific use cases.\n"
-             + "\n"
-             + "TABLE SELECTION GUIDE:\n"
-             + "  User asks about...                    → Use this table\n"
-             + "  Daily totals (sales/purchase/etc)     → ai_daily_summary\n"
-             + "  Individual sales bill / by party      → ai_sales\n"
-             + "  Individual purchase bill / by party   → ai_purchase\n"
-             + "  Individual receipt / who paid us      → ai_collection_summary\n"
-             + "  Individual payment / who we paid      → ai_payment_summary\n"
-             + "  Bank balance / account balance        → ai_bank_balance_summary\n"
-             + "  Party details / contact / GSTIN       → ai_party_status\n"
-             + "\n"
-             + "FILTER OPERATORS:\n"
-             + "  =        exact match (use for IDs, modes, types, specific dates)\n"
-             + "  LIKE     partial name match (use for party_name, bank_name)\n"
-             + "  BETWEEN  date range — value format: 'yyyy-MM-dd,yyyy-MM-dd'\n"
-             + "  >=, <=   numeric or date comparison\n"
-             + "  IN       multiple values — value format: 'val1,val2,val3'\n"
-             + "\n"
-             + "AGGREGATION (use select_columns with aggregate functions):\n"
-             + "  SUM(amount), COUNT(bill_no), AVG(amount), MIN(bill_date), MAX(bill_date)\n"
-             + "  COUNT(DISTINCT party_name) ← counts unique parties (ignores duplicates)\n"
-             + "  Use COUNT(DISTINCT party_name) when asked for unique/distinct party count\n"
-             + "  Combine with group_by for breakdowns e.g. group_by=receipt_mode for cash vs bank split\n"
-             + "\n"
-             + "ALWAYS use select_columns='all' for ai_party_status queries.\n"
-             + "For ai_bank_balance_summary, always fetch all columns — it's a small table.\n"
+             + "COLLECTIONS (money IN): total_collection / cash_collection / bank_collection in ai_daily_summary\n"
+             + "  Individual transactions → ai_collection_summary (receipt_date, party_name, amount, receipt_mode)\n"
+             + "PAYMENTS (money OUT): total_payment / cash_payment / bank_payment in ai_daily_summary\n"
+             + "  Individual transactions → ai_payment_summary (payment_date, party_name, amount, payment_mode)\n"
+             + "SALES: daily totals → ai_daily_summary | individual bills → ai_sales\n"
+             + "PURCHASE: daily totals → ai_daily_summary | individual bills → ai_purchase\n"
+             + "BANK: → ai_bank_balance_summary (bank_name, balance_type, balance)\n"
+             + "NEVER confuse total_payment with total_collection\n"
              + "\n"
              + "=== MANDATORY COLUMN ORDER FOR UI DISPLAY ===\n"
-             + "When displaying results in chat, ALWAYS select columns in this EXACT order using select_columns.\n"
-             + "This ensures the UI table matches the PDF report exactly.\n"
+             + "ALWAYS use these exact select_columns for each table:\n"
+             + "ai_sales: party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode,created_by\n"
+             + "ai_purchase: party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode\n"
+             + "ai_party_status: party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin\n"
+             + "ai_collection_summary: receipt_date,party_name,amount,receipt_mode,cheque_txn_no\n"
+             + "ai_payment_summary: payment_date,party_name,amount,payment_mode,cheque_txn_no\n"
+             + "ai_bank_balance_summary: bank_name,balance_type,balance\n"
+             + "ai_daily_summary: summary_date,total_sales,cash_sales,credit_sales,total_bills_count,total_collection,cash_collection,bank_collection,total_payment,cash_payment,bank_payment,total_purchase,cash_purchase,credit_purchase,total_receivable,total_payable,total_discount_given\n"
              + "\n"
-             + "ai_sales:\n"
-             + "  select_columns='party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode,created_by'\n"
+             + "=== TABLE SELECTION GUIDE ===\n"
+             + "Daily totals (sales/purchase/collection/payment) → ai_daily_summary\n"
+             + "Individual sales bill / by party / by bill_no   → ai_sales\n"
+             + "Individual purchase bill                        → ai_purchase\n"
+             + "Who paid us / receipt details                   → ai_collection_summary\n"
+             + "Who we paid / payment details                   → ai_payment_summary\n"
+             + "Bank/account balances                           → ai_bank_balance_summary\n"
+             + "Party contact/address/balance/GSTIN             → ai_party_status\n"
              + "\n"
-             + "ai_purchase:\n"
-             + "  select_columns='party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode'\n"
+             + "=== PARTY STATUS QUERIES ===\n"
+             + "- ALWAYS set select_columns to the full party_status order above\n"
+             + "- Filter party_name LIKE <key part of name> — use short keyword not full name\n"
+             + "- Filter party_type = 'Customer' or 'Supplier' for type\n"
+             + "- Filter sub_party_type = 'Dealer' / 'Buyer' etc for sub-type\n"
+             + "- If no result, retry with shorter name keyword\n"
              + "\n"
-             + "ai_party_status:\n"
-             + "  select_columns='party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin'\n"
-             + "\n"
-             + "ai_collection_summary:\n"
-             + "  select_columns='receipt_date,party_name,amount,receipt_mode,cheque_txn_no'\n"
-             + "\n"
-             + "ai_payment_summary:\n"
-             + "  select_columns='payment_date,party_name,amount,payment_mode,cheque_txn_no'\n"
-             + "\n"
-             + "ai_bank_balance_summary:\n"
-             + "  select_columns='bank_name,balance_type,balance'\n"
-             + "\n"
-             + "ai_daily_summary:\n"
-             + "  select_columns='summary_date,total_sales,cash_sales,credit_sales,total_bills_count,total_collection,cash_collection,bank_collection,total_payment,cash_payment,bank_payment,total_purchase,cash_purchase,credit_purchase,total_receivable,total_payable,total_discount_given'\n"
-             + "\n"
-             + "EXCEPTION: If user asks for only specific fields (e.g. just contact number), still fetch using the full order above\n"
-             + "but highlight the relevant field in bold in your response.\n"
-             + "NEVER use select_columns='all' for ai_sales, ai_purchase, ai_collection_summary, ai_payment_summary,\n"
-             + "ai_bank_balance_summary, or ai_daily_summary — always use the explicit ordered list above.\n"
+             + "=== LARGE DATA HANDLING ===\n"
+             + "When user asks for 'all parties', 'all suppliers', 'all customers', 'complete list',\n"
+             + "'all collections', 'all payments', 'all purchases', 'all bank balances' — respond ONLY with:\n"
+             + "{\"__export__\":true,\"table\":\"TABLE_NAME\",\"filter_col\":\"COL_OR_EMPTY\",\"filter_val\":\"VAL_OR_EMPTY\",\"order_by\":\"COL_OR_EMPTY\",\"label\":\"DESCRIPTION\"}\n"
+             + "Examples:\n"
+             + "  All suppliers:     {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Supplier\",\"order_by\":\"party_name\",\"label\":\"All Suppliers\"}\n"
+             + "  All bank balances: {\"__export__\":true,\"table\":\"ai_bank_balance_summary\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"balance\",\"label\":\"All Bank Balances\"}\n"
+             + "  All collections April: {\"__export__\":true,\"table\":\"ai_collection_summary\",\"filter_col\":\"receipt_date\",\"filter_val\":\"2026-04-01,2026-04-30\",\"order_by\":\"receipt_date\",\"label\":\"Collections April 2026\"}\n"
              + "\n"
              + "=== DATE REFERENCE ===\n"
-             + "Today           = " + todayStr + " (" + todayIso + ")\n"
-             + "This month      = " + monthStart + " to " + monthEnd + "\n"
-             + "Previous month  = " + prevMonthStart + " to " + prevMonthEnd + "\n"
-             + "This year (cal) = " + yearStart + " to " + todayIso + "\n"
-             + "Financial year  = " + fyStart + " to " + fyEnd + "\n\n"
-             + "=== LARGE DATA HANDLING ===\n"
-             + "When a user asks for 'all parties', 'all suppliers', 'all customers', 'give me all details', 'complete list',\n"
-             + "'all collections', 'all payments', 'all purchases', 'all bank balances' or any query\n"
-             + "that would return more than 50 rows, DO NOT output the table yourself.\n"
-             + "Instead respond ONLY with this exact JSON on a single line and nothing else:\n"
-             + "{\"__export__\":true,\"table\":\"TABLE_NAME\",\"filter_col\":\"COLUMN_OR_EMPTY\",\"filter_val\":\"VALUE_OR_EMPTY\",\"order_by\":\"COLUMN_OR_EMPTY\",\"label\":\"HUMAN READABLE DESCRIPTION\"}\n"
-             + "Examples:\n"
-             + "  All suppliers:          {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Supplier\",\"order_by\":\"party_name\",\"label\":\"All Suppliers\"}\n"
-             + "  All parties:            {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"party_name\",\"label\":\"All Parties\"}\n"
-             + "  All bank balances:      {\"__export__\":true,\"table\":\"ai_bank_balance_summary\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"balance\",\"label\":\"All Bank Balances\"}\n"
-             + "  All collections April:  {\"__export__\":true,\"table\":\"ai_collection_summary\",\"filter_col\":\"receipt_date\",\"filter_val\":\"2026-04-01,2026-04-30\",\"order_by\":\"receipt_date\",\"label\":\"Collections April 2026\"}\n"
-             + "  All payments April:     {\"__export__\":true,\"table\":\"ai_payment_summary\",\"filter_col\":\"payment_date\",\"filter_val\":\"2026-04-01,2026-04-30\",\"order_by\":\"payment_date\",\"label\":\"Payments April 2026\"}\n"
-             + "  All purchase bills:     {\"__export__\":true,\"table\":\"ai_purchase\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"bill_date\",\"label\":\"All Purchase Bills\"}\n"
-             + "The frontend will intercept this JSON and handle the download directly.\n\n"
-             + "=== PARTY STATUS QUERIES — READ CAREFULLY ===\n"
-             + "- For ANY question about a party/supplier/customer → ALWAYS use query_table on ai_party_status\n"
-             + "- ALWAYS set select_columns='all' when querying ai_party_status — NEVER restrict to specific columns\n"
-             + "  Even if user asks ONLY for contact number, address, GSTIN, email, or any single field:\n"
-             + "  → still fetch ALL columns (select_columns='all'), then highlight the requested field in your reply\n"
-             + "  → NEVER set select_columns='contact_number' or any subset — it causes query failures\n"
-             + "- Filter by party_name LIKE <partial_name> — use the key part of the name, not the full name\n"
-             + "  Example: user asks about 'Raj Traders Delhi' → filter party_name LIKE 'Raj Traders'\n"
-             + "  Example: user asks about 'Anand Trading' → filter party_name LIKE 'Anand'\n"
-             + "- Filter by party_type = 'Supplier' or party_type = 'Customer' when user specifies type\n"
-             + "- If query returns multiple matches, show all of them in a table\n"
-             + "- If result is empty, try again with a shorter/simpler version of the party name\n"
-             + "- If still empty, say 'No party found matching that name'\n\n"
+             + "Today        = " + todayStr + " (" + todayIso + ")\n"
+             + "This month   = " + monthStart + " to " + todayIso + "\n"
+             + "Prev month   = " + prevMonthStart + " to " + prevMonthEnd + "\n"
+             + "Finance year = " + fyStart + " to " + fyEnd + "\n"
+             + "Date columns: summary_date (ai_daily_summary), bill_date (ai_sales/ai_purchase),\n"
+             + "              receipt_date (ai_collection_summary), payment_date (ai_payment_summary)\n"
+             + "\n"
+             + "=== AGGREGATION ===\n"
+             + "SUM(col), COUNT(col), COUNT(DISTINCT col), AVG(col), MIN(col), MAX(col)\n"
+             + "Use COUNT(DISTINCT party_name) for unique party count\n"
+             + "Combine with group_by for breakdowns\n"
+             + "\n"
              + "=== STRICT RULES ===\n"
-             + "- NEVER hallucinate data — return exactly what the tool provides\n"
-             + "- NEVER add dates to a query unless the user specifically asked for a date filter\n"
-             + "- NEVER summarize or truncate tool results — show every row returned\n"
-             + "- NEVER say 'here are the first few' — if you got data, show it all\n"
-             + "- If the tool returns 'No data found' — report that truthfully, do not guess\n"
-             + "- Stock data is not available — say so if asked\n"
-             + "- ONLY answer ERP data questions\n\n"
+             + "- NEVER hallucinate — return exactly what the tool provides\n"
+             + "- NEVER add date filters unless user specified a date\n"
+             + "- NEVER summarize or truncate — show every row returned by the tool\n"
+             + "- If tool returns 'No data found' — say so truthfully\n"
+             + "- Stock data not available\n"
+             + "\n"
              + "=== LANGUAGE ===\n"
-             + "- Message starts with [LANG:EN] → respond in English only\n"
-             + "- Message starts with [LANG:HI] → respond in Hindi only\n"
-             + "- Never mix languages\n\n"
+             + "[LANG:EN] → respond in English | [LANG:HI] → respond in Hindi\n"
+             + "\n"
              + "=== OUTPUT FORMAT ===\n"
-             + "- Currency: use ₹ with Indian number format (e.g. ₹1,24,500.00)\n"
-             + "- Dates: DD MMM YYYY format (e.g. 01 Jun 2026)\n"
-             + "- Multiple rows: clean markdown table with headers\n"
+             + "- Currency: ₹ with Indian format (₹1,24,500.00)\n"
+             + "- Dates: DD MMM YYYY (01 Apr 2026)\n"
+             + "- Multiple rows: markdown table\n"
              + "- Single value: bold the key number\n"
              + "- Never show raw JSON\n";
     }
@@ -272,83 +173,62 @@ public class GeminiService {
             "functionDeclarations": [
               {
                 "name": "query_table",
-                "description": "Universal query tool. Use this to fetch ANY data from the ERP database. Supports filters on any column, sorting, grouping, and selecting specific columns. Use this for: bills by bill_no, bills by party name, sales/purchase/collection/payment for any date or date range, cash vs credit sales, party search, any custom query.",
+                "description": "Universal query tool for all ERP data. Use for: sales bills by date/party/bill_no, purchase bills, collection transactions, payment transactions, bank balances, party details, daily summaries. Supports filters, sorting, grouping, aggregations.",
                 "parameters": {
                   "type": "object",
                   "properties": {
                     "table_name": {
                       "type": "string",
-                      "description": "Table to query. Must be one of: ai_daily_summary, ai_sales, ai_purchase, ai_collection_summary, ai_payment_summary, ai_bank_balance_summary, ai_party_status"
+                      "description": "One of: ai_daily_summary, ai_sales, ai_purchase, ai_collection_summary, ai_payment_summary, ai_bank_balance_summary, ai_party_status"
                     },
                     "filters": {
                       "type": "array",
-                      "description": "List of filter conditions (do NOT include company_id — it is added automatically). Each filter has column, operator, value.",
+                      "description": "Filter conditions. Do NOT include company_id. Operators: =, !=, >, <, >=, <=, LIKE, BETWEEN, IN. For BETWEEN use value='yyyy-MM-dd,yyyy-MM-dd'. For LIKE use partial name.",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "column":   { "type": "string", "description": "Exact column name from the table schema" },
-                          "operator": { "type": "string", "description": "One of: =, !=, >, <, >=, <=, LIKE, BETWEEN, IN. Use LIKE for partial name match. Use BETWEEN for date ranges with value='start,end'." },
-                          "value":    { "type": "string", "description": "Filter value. For BETWEEN use 'yyyy-MM-dd,yyyy-MM-dd'. For IN use comma-separated values." }
+                          "column":   { "type": "string" },
+                          "operator": { "type": "string" },
+                          "value":    { "type": "string" }
                         },
                         "required": ["column", "operator", "value"]
                       }
                     },
                     "select_columns": {
                       "type": "string",
-                      "description": "Comma-separated column names in the EXACT display order. MANDATORY ORDERS: ai_sales=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode,created_by | ai_purchase=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode | ai_party_status=party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin | ai_collection_summary=receipt_date,party_name,amount,receipt_mode,cheque_txn_no | ai_payment_summary=payment_date,party_name,amount,payment_mode,cheque_txn_no | ai_bank_balance_summary=bank_name,balance_type,balance. For aggregations use SUM(col) or COUNT(DISTINCT col)."
+                      "description": "Comma-separated columns in mandatory display order. ai_sales=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode,created_by | ai_purchase=party_name,bill_no,bill_date,voucher_date,gross_amount,discount_amount,taxable_amount,sgst_amount,cgst_amount,igst_amount,invoice_amount,payment_mode | ai_party_status=party_name,party_type,sub_party_type,outstanding_balance,balance_type,overdue_days,credit_limit,last_bill_date,last_bill_amount,total_business_ytd,contact_number,email,address,gstin | ai_collection_summary=receipt_date,party_name,amount,receipt_mode,cheque_txn_no | ai_payment_summary=payment_date,party_name,amount,payment_mode,cheque_txn_no | ai_bank_balance_summary=bank_name,balance_type,balance. For aggregations use SUM(col) or COUNT(DISTINCT col)."
                     },
-                    "group_by": {
-                      "type": "string",
-                      "description": "Column to group results by. Optional. Example: 'payment_mode' to group bills by cash/credit."
-                    },
-                    "order_by": {
-                      "type": "string",
-                      "description": "Column to sort results by. Optional."
-                    },
-                    "sort_direction": {
-                      "type": "string",
-                      "description": "ASC or DESC. Default DESC."
-                    },
-                    "limit": {
-                      "type": "integer",
-                      "description": "Maximum number of rows to return. Default 200, max 2000. When user says 'all', 'complete list', 'सभी', 'पूरी list' or similar — always set this to 2000 to ensure all records are returned."
-                    }
+                    "group_by":        { "type": "string", "description": "Column to group by. Optional." },
+                    "order_by":        { "type": "string", "description": "Column to sort by. Optional." },
+                    "sort_direction":  { "type": "string", "description": "ASC or DESC. Default DESC." },
+                    "limit":           { "type": "integer", "description": "Max rows. Default 200, max 2000. Set 2000 for 'all' queries." }
                   },
                   "required": ["table_name"]
                 }
               },
               {
                 "name": "get_table_schema",
-                "description": "Get the exact column names available in a table. Call this if you are unsure of a column name before running query_table. Pass 'all' to see all 7 tables. Available tables: ai_daily_summary, ai_sales, ai_purchase, ai_collection_summary, ai_payment_summary, ai_bank_balance_summary, ai_party_status",
+                "description": "Get exact column names for a table. Pass 'all' for all 7 tables. Call this if unsure of column names.",
                 "parameters": {
                   "type": "object",
                   "properties": {
-                    "table_name": {
-                      "type": "string",
-                      "description": "Table name, or 'all' to see all tables and columns."
-                    }
+                    "table_name": { "type": "string", "description": "Table name or 'all'" }
                   },
                   "required": ["table_name"]
                 }
               },
               {
                 "name": "get_today_summary",
-                "description": "Get today's complete summary: sales, bills, cash/credit split, collection, payment, purchase. Fastest way to get today's overview.",
-                "parameters": {
-                  "type": "object",
-                  "properties": {}
-                }
+                "description": "Get today's complete summary: sales, bills, cash/credit split, collection, payment, purchase.",
+                "parameters": { "type": "object", "properties": {} }
               },
               {
                 "name": "get_overdue_parties",
-                "description": "Get all parties/customers with overdue payments (balance_type DR and overdue_days > 0).",
+                "description": "Get all parties with overdue payments (balance_type DR and overdue_days > threshold).",
                 "parameters": {
                   "type": "object",
                   "properties": {
-                    "min_overdue_days": {
-                      "type": "integer",
-                      "description": "Minimum overdue days threshold. Default 1."
-                    }
+                    "min_overdue_days": { "type": "integer", "description": "Minimum overdue days. Default 1." }
                   }
                 }
               }
@@ -365,35 +245,45 @@ public class GeminiService {
                        String language) {
         String langTag = "hi".equalsIgnoreCase(language) ? "[LANG:HI] " : "[LANG:EN] ";
         userMessage = langTag + userMessage;
-
         try {
             ObjectNode requestBody = buildRequestBody(userMessage, conversationHistory, true);
             String responseStr = callGemini(requestBody);
-            JsonNode response = mapper.readTree(responseStr);
+            JsonNode response  = mapper.readTree(responseStr);
             return processResponse(response, userMessage, conversationHistory, 0);
         } catch (Exception e) {
+            log.error("[Gemini] Chat error: {}", e.getMessage());
             return "Sorry, I encountered an error: " + e.getMessage();
         }
     }
 
-    // ─── Process Gemini response (handles multi-turn tool calls) ─────────────
+    // ─── Process response (single tool call cycle, no recursion loop) ─────────
     private String processResponse(JsonNode response,
                                    String originalMessage,
                                    List<Map<String, Object>> history,
                                    int depth) throws Exception {
-        if (depth > 2) return "Maximum tool call depth reached.";
+        if (depth > 1) {
+            // At depth > 1 just return whatever text we have
+            JsonNode cands = response.path("candidates");
+            if (!cands.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                for (JsonNode part : cands.get(0).path("content").path("parts")) {
+                    if (part.has("text")) sb.append(part.get("text").asText());
+                }
+                String t = sb.toString().trim();
+                return t.isEmpty() ? "No data found for the requested query." : t;
+            }
+            return "No data found for the requested query.";
+        }
 
         JsonNode candidates = response.path("candidates");
         if (candidates.isEmpty()) {
-            log.error("[Gemini] No candidates: {}", response.toString().substring(0, Math.min(300, response.toString().length())));
+            log.error("[Gemini] No candidates in response");
             return "No response from Gemini.";
         }
 
-        JsonNode candidate  = candidates.get(0);
-        JsonNode parts      = candidate.path("content").path("parts");
-        String finishReason = candidate.path("finishReason").asText("");
-
-        log.info("[Gemini] depth={} finishReason={} parts={}", depth, finishReason, parts.size());
+        JsonNode parts      = candidates.get(0).path("content").path("parts");
+        String finishReason = candidates.get(0).path("finishReason").asText("");
+        log.info("[Gemini] depth={} finishReason={}", depth, finishReason);
 
         StringBuilder textParts = new StringBuilder();
         List<JsonNode> toolCalls = new ArrayList<>();
@@ -401,27 +291,22 @@ public class GeminiService {
         for (JsonNode part : parts) {
             if (part.has("functionCall")) {
                 toolCalls.add(part.get("functionCall"));
-                log.info("[Gemini] Tool call: {} | args: {}",
-                    part.get("functionCall").path("name").asText(),
+                log.info("[Gemini] Tool: {} args={}", part.get("functionCall").path("name").asText(),
                     part.get("functionCall").path("args").toString());
             } else if (part.has("text")) {
                 textParts.append(part.get("text").asText());
             }
         }
 
-        // No tool calls — return text directly
+        // No tool calls → return text directly
         if (toolCalls.isEmpty()) {
-            String text = textParts.toString().trim();
-            if (text.isEmpty() && depth > 0) {
-                return "No data found for the requested query. Please try rephrasing or check the date/filters.";
-            }
-            return text;
+            return textParts.toString().trim();
         }
 
-        // Execute all tool calls, collect results
+        // Build full conversation: history + user message + model tool call + tool results
         ArrayNode contents = buildContentsWithHistory(originalMessage, history);
 
-        // Model turn — the tool call(s)
+        // Model turn (tool call)
         ObjectNode modelTurn = mapper.createObjectNode();
         modelTurn.put("role", "model");
         ArrayNode modelParts = mapper.createArrayNode();
@@ -433,59 +318,28 @@ public class GeminiService {
         modelTurn.set("parts", modelParts);
         contents.add(modelTurn);
 
-        // Execute tools and collect raw results
-        List<String> rawResults = new ArrayList<>();
+        // Tool result turn
         ObjectNode resultTurn = mapper.createObjectNode();
         resultTurn.put("role", "user");
         ArrayNode resultParts = mapper.createArrayNode();
-
         for (JsonNode tc : toolCalls) {
             String funcName = tc.get("name").asText();
             String result   = executeFunctionCall(funcName, tc.path("args"));
-            rawResults.add(result);
-            log.info("[Gemini] Result for {}: rows={}, size={}chars", funcName,
-                result.contains("row_count") ? result.replaceAll(".*\"row_count\":(\\d+).*", "$1") : "?",
-                result.length());
-
-            // If result is large JSON data, pass a trimmed version to Gemini
-            // but keep the full result for direct rendering
-            String resultForGemini = result;
-            if (result.startsWith("{") && result.contains("\"data\"")) {
-                try {
-                    JsonNode parsed = mapper.readTree(result);
-                    int rowCount = parsed.path("row_count").asInt(0);
-                    // If more than 15 rows, only send first 5 rows to Gemini
-                    // and instruct it to format based on those (it will produce the right headers)
-                    if (rowCount > 15) {
-                        JsonNode dataArr = parsed.path("data");
-                        ObjectNode trimmed = mapper.createObjectNode();
-                        trimmed.put("table", parsed.path("table").asText());
-                        trimmed.put("row_count", rowCount);
-                        trimmed.put("note", "ONLY FIRST 5 ROWS SHOWN BELOW. Produce the markdown table with correct headers and these rows. State total rows = " + rowCount + " at the top.");
-                        ArrayNode first5 = mapper.createArrayNode();
-                        for (int i = 0; i < Math.min(5, dataArr.size()); i++) first5.add(dataArr.get(i));
-                        trimmed.set("data", first5);
-                        resultForGemini = trimmed.toString();
-                        log.info("[Gemini] Trimmed result from {} to 5 rows for Gemini formatting", rowCount);
-                    }
-                } catch (Exception e) {
-                    // keep original if parse fails
-                }
-            }
+            log.info("[Gemini] Tool result size={}chars", result.length());
 
             ObjectNode fp = mapper.createObjectNode();
             ObjectNode fr = mapper.createObjectNode();
             fr.put("name", funcName);
-            ObjectNode responseNode = mapper.createObjectNode();
-            responseNode.put("result", resultForGemini);
-            fr.set("response", responseNode);
+            ObjectNode rn = mapper.createObjectNode();
+            rn.put("result", result);
+            fr.set("response", rn);
             fp.set("functionResponse", fr);
             resultParts.add(fp);
         }
         resultTurn.set("parts", resultParts);
         contents.add(resultTurn);
 
-        // Follow-up — NO tools, forces Gemini to write the final text answer
+        // Follow-up call — NO tools, Gemini must write the answer
         ObjectNode followUp = mapper.createObjectNode();
         ObjectNode sys = mapper.createObjectNode();
         sys.set("parts", mapper.createArrayNode().add(
@@ -497,9 +351,8 @@ public class GeminiService {
         cfg.put("maxOutputTokens", 65536);
         followUp.set("generationConfig", cfg);
 
-        String followUpStr  = callGemini(followUp);
-        JsonNode followUpJson = mapper.readTree(followUpStr);
-        return processResponse(followUpJson, originalMessage, history, depth + 1);
+        String fr2 = callGemini(followUp);
+        return processResponse(mapper.readTree(fr2), originalMessage, history, depth + 1);
     }
 
     // ─── Build request body ───────────────────────────────────────────────────
@@ -507,22 +360,16 @@ public class GeminiService {
                                         List<Map<String, Object>> history,
                                         boolean includeTools) throws Exception {
         ObjectNode body = mapper.createObjectNode();
-
-        ObjectNode sysInstr = mapper.createObjectNode();
-        sysInstr.set("parts", mapper.createArrayNode().add(
+        ObjectNode sys = mapper.createObjectNode();
+        sys.set("parts", mapper.createArrayNode().add(
             mapper.createObjectNode().put("text", buildSystemPrompt())));
-        body.set("systemInstruction", sysInstr);
-
-        ArrayNode contents = buildContentsWithHistory(userMessage, history);
-        body.set("contents", contents);
-
+        body.set("systemInstruction", sys);
+        body.set("contents", buildContentsWithHistory(userMessage, history));
         if (includeTools) body.set("tools", buildToolDefinitions());
-
-        ObjectNode genConfig = mapper.createObjectNode();
-        genConfig.put("temperature", 0.1);
-        genConfig.put("maxOutputTokens", 65536);
-        body.set("generationConfig", genConfig);
-
+        ObjectNode cfg = mapper.createObjectNode();
+        cfg.put("temperature", 0.1);
+        cfg.put("maxOutputTokens", 65536);
+        body.set("generationConfig", cfg);
         return body;
     }
 
@@ -530,15 +377,13 @@ public class GeminiService {
                                                List<Map<String, Object>> history) {
         ArrayNode contents = mapper.createArrayNode();
 
-        // Keep only the last 10 turns (5 user + 5 model) to prevent context overflow
-        // This ensures consistent performance regardless of conversation length
-        List<Map<String, Object>> trimmedHistory = history;
+        // Keep only last 10 turns to prevent context overflow
+        List<Map<String, Object>> trimmed = history;
         if (history.size() > 10) {
-            trimmedHistory = history.subList(history.size() - 10, history.size());
-            log.info("[Gemini] History trimmed from {} to 10 turns", history.size());
+            trimmed = history.subList(history.size() - 10, history.size());
         }
 
-        for (Map<String, Object> turn : trimmedHistory) {
+        for (Map<String, Object> turn : trimmed) {
             ObjectNode content = mapper.createObjectNode();
             content.put("role", (String) turn.get("role"));
             ArrayNode parts = mapper.createArrayNode();
@@ -560,7 +405,6 @@ public class GeminiService {
         String companyId = "HOTAGE INDIA";
         return switch (funcName) {
             case "query_table" -> {
-                // Parse filters array
                 List<Map<String, String>> filters = new ArrayList<>();
                 JsonNode filtersNode = args.path("filters");
                 if (filtersNode.isArray()) {
@@ -583,12 +427,9 @@ public class GeminiService {
                     companyId
                 );
             }
-            case "get_table_schema" ->
-                erpFunctions.getTableSchema(args.path("table_name").asText("all"));
-            case "get_today_summary" ->
-                erpFunctions.getTodaySummary(companyId);
-            case "get_overdue_parties" ->
-                erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
+            case "get_table_schema"   -> erpFunctions.getTableSchema(args.path("table_name").asText("all"));
+            case "get_today_summary"  -> erpFunctions.getTodaySummary(companyId);
+            case "get_overdue_parties" -> erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
             default -> "Function '" + funcName + "' not found.";
         };
     }
