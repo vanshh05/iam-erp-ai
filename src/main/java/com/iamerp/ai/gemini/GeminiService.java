@@ -215,7 +215,6 @@ public class GeminiService {
              + "- NEVER add date filters unless user specified a date\n"
              + "- NEVER summarize or truncate — show every row returned by the tool\n"
              + "- If tool returns 'No data found' — say so truthfully\n"
-             + "- Stock data not available\n"
              + "\n"
              + "=== LANGUAGE ===\n"
              + "[LANG:EN] → respond in English | [LANG:HI] → respond in Hindi\n"
@@ -364,13 +363,15 @@ public class GeminiService {
         }
     }
 
-    // ─── Process response (single tool call cycle, no recursion loop) ─────────
+    // ─── Process response (supports chained tool calls, capped at MAX_TOOL_DEPTH) ─
+    private static final int MAX_TOOL_DEPTH = 4;
+
     private String processResponse(JsonNode response,
                                    String originalMessage,
                                    List<Map<String, Object>> history,
                                    int depth) throws Exception {
-        if (depth > 1) {
-            // At depth > 1 just return whatever text we have
+        if (depth > MAX_TOOL_DEPTH) {
+            // Safety cap reached — return whatever text we have rather than looping forever
             JsonNode cands = response.path("candidates");
             if (!cands.isEmpty()) {
                 StringBuilder sb = new StringBuilder();
@@ -447,13 +448,14 @@ public class GeminiService {
         resultTurn.set("parts", resultParts);
         contents.add(resultTurn);
 
-        // Follow-up call — NO tools, Gemini must write the answer
+        // Follow-up call — tools included so Gemini can chain (e.g. get_stock_spec_map → query_stock)
         ObjectNode followUp = mapper.createObjectNode();
         ObjectNode sys = mapper.createObjectNode();
         sys.set("parts", mapper.createArrayNode().add(
             mapper.createObjectNode().put("text", buildSystemPrompt())));
         followUp.set("systemInstruction", sys);
         followUp.set("contents", contents);
+        followUp.set("tools", buildToolDefinitions());
         ObjectNode cfg = mapper.createObjectNode();
         cfg.put("temperature", 0.1);
         cfg.put("maxOutputTokens", 65536);
