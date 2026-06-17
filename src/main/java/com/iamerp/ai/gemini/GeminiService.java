@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.*;
 import com.iamerp.ai.functions.ErpFunctions;
+import com.iamerp.ai.functions.StockFunctions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,13 +25,15 @@ public class GeminiService {
     private String apiUrl;
 
     private final ErpFunctions erpFunctions;
+    private final StockFunctions stockFunctions;
     private final ObjectMapper mapper = new ObjectMapper();
     private final WebClient webClient = WebClient.builder()
             .codecs(c -> c.defaultCodecs().maxInMemorySize(4 * 1024 * 1024))
             .build();
 
-    public GeminiService(ErpFunctions erpFunctions) {
+    public GeminiService(ErpFunctions erpFunctions, StockFunctions stockFunctions) {
         this.erpFunctions = erpFunctions;
+        this.stockFunctions = stockFunctions;
     }
 
     // ─── System Prompt ────────────────────────────────────────────────────────
@@ -89,6 +92,25 @@ public class GeminiService {
              + "  outstanding_balance, balance_type (DR=they owe us / CR=we owe them)\n"
              + "  last_bill_date, last_bill_amount, total_business_ytd, credit_limit, overdue_days\n"
              + "\n"
+             + "TABLE: ai_stock_summary  — warehouse stock (one row per item unit)\n"
+             + "  item_name VARCHAR, quantity DECIMAL\n"
+             + "  spec_value_1 through spec_value_20 — generic specification columns\n"
+             + "  IMPORTANT: spec_value_N columns have DIFFERENT meanings per company.\n"
+             + "  ALWAYS call get_stock_spec_map first before any stock query to know which column = which spec.\n"
+             + "\n"
+             + "TABLE: ai_stock_spec_map  — maps spec columns to human labels per company\n"
+             + "  company_id, spec_column (e.g. spec_value_1), spec_label (e.g. Color)\n"
+             + "\n"
+             + "=== STOCK QUERY RULES ===\n"
+             + "- ALWAYS call get_stock_spec_map FIRST before any stock query\n"
+             + "- Use the returned map to know which spec_value_N = which label for this company\n"
+             + "- For queries like 'how many RED vehicles': get map → find Color column → filter that column = 'RED'\n"
+             + "- For queries like 'find chassis number X': get map → find Chassis Number column → filter that column\n"
+             + "- For broad searches ('find RED in stock'): use search_stock_by_spec_value tool\n"
+             + "- For item-specific queries: use query_stock tool with item_name filter\n"
+             + "- For summaries ('how many of each color'): use query_stock with group_by_label='Color'\n"
+             + "- Stock data is ONLY in ai_stock_summary — never use query_table for stock\n"
+             + "\n"
              + "=== CRITICAL COLUMN RULES ===\n"
              + "COLLECTIONS (money IN): total_collection / cash_collection / bank_collection in ai_daily_summary\n"
              + "  Individual transactions → ai_collection_summary (receipt_date, party_name, amount, receipt_mode)\n"
@@ -117,6 +139,7 @@ public class GeminiService {
              + "Who we paid / payment details                   → ai_payment_summary\n"
              + "Bank/account balances                           → ai_bank_balance_summary\n"
              + "Party contact/address/balance/GSTIN             → ai_party_status\n"
+             + "Stock / inventory / warehouse / items           → ai_stock_summary (use stock tools, NOT query_table)\n"
              + "\n"
              + "=== PARTY STATUS QUERIES ===\n"
              + "- ALWAYS set select_columns to the full party_status order above\n"
@@ -270,6 +293,51 @@ public class GeminiService {
                   "properties": {
                     "min_overdue_days": { "type": "integer", "description": "Minimum overdue days. Default 1." }
                   }
+                }
+              },
+              {
+                "name": "get_stock_spec_map",
+                "description": "MUST call this before any stock query. Returns the mapping of spec_value_N columns to human-readable labels for this company. e.g. {spec_value_1: 'Color', spec_value_2: 'Chassis Number'}. Use this to know which column to filter when user asks about color, size, or any specification.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {}
+                }
+              },
+              {
+                "name": "query_stock",
+                "description": "Query stock items with filters based on spec labels (not column names). Use AFTER calling get_stock_spec_map. For example: filter by Color=RED, or group by Color to get counts per color.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "filters": {
+                      "type": "array",
+                      "description": "List of filter conditions using human label names (e.g. 'Color') or fixed columns (item_name, quantity). Each has label, operator, value.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label":    { "type": "string", "description": "Spec label (e.g. 'Color') or fixed column (item_name, quantity)" },
+                          "operator": { "type": "string", "description": "=, !=, LIKE, >, <, >=, <=, IN" },
+                          "value":    { "type": "string", "description": "Filter value" }
+                        },
+                        "required": ["label", "operator", "value"]
+                      }
+                    },
+                    "group_by_label": { "type": "string", "description": "Spec label or column to group by. e.g. 'Color' to get count per color." },
+                    "order_by_label": { "type": "string", "description": "Spec label or column to sort by. e.g. 'quantity'." },
+                    "sort_direction": { "type": "string", "description": "ASC or DESC. Default DESC." },
+                    "limit":          { "type": "integer", "description": "Max rows. Default 200." }
+                  }
+                }
+              },
+              {
+                "name": "search_stock_by_spec_value",
+                "description": "Search across ALL spec columns for a value. Use when user asks to 'find RED' or 'search for chassis number X' and you are not sure which spec column contains that value. Searches only mapped columns for this company.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "search_value": { "type": "string", "description": "Value to search for across all spec columns." }
+                  },
+                  "required": ["search_value"]
                 }
               }
             ]
@@ -467,9 +535,33 @@ public class GeminiService {
                     companyId
                 );
             }
-            case "get_table_schema"   -> erpFunctions.getTableSchema(args.path("table_name").asText("all"));
-            case "get_today_summary"  -> erpFunctions.getTodaySummary(companyId);
+            case "get_table_schema"    -> erpFunctions.getTableSchema(args.path("table_name").asText("all"));
+            case "get_today_summary"   -> erpFunctions.getTodaySummary(companyId);
             case "get_overdue_parties" -> erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
+            case "get_stock_spec_map"  -> stockFunctions.getSpecMap(companyId);
+            case "query_stock" -> {
+                List<Map<String, String>> filters = new ArrayList<>();
+                JsonNode filtersNode = args.path("filters");
+                if (filtersNode.isArray()) {
+                    for (JsonNode f : filtersNode) {
+                        Map<String, String> filter = new HashMap<>();
+                        filter.put("label",    f.path("label").asText(""));
+                        filter.put("operator", f.path("operator").asText("="));
+                        filter.put("value",    f.path("value").asText(""));
+                        filters.add(filter);
+                    }
+                }
+                yield stockFunctions.queryStock(
+                    companyId,
+                    filters,
+                    args.path("group_by_label").asText(null),
+                    args.path("order_by_label").asText(null),
+                    args.path("sort_direction").asText("DESC"),
+                    args.path("limit").asInt(200)
+                );
+            }
+            case "search_stock_by_spec_value" ->
+                stockFunctions.searchBySpecValue(companyId, args.path("search_value").asText(""));
             default -> "Function '" + funcName + "' not found.";
         };
     }
