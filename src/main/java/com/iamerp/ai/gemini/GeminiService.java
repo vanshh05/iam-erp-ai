@@ -109,6 +109,13 @@ public class GeminiService {
              + "- For broad searches ('find RED in stock'): use search_stock_by_spec_value tool\n"
              + "- For item-specific queries: use query_stock tool with item_name filter\n"
              + "- For summaries ('how many of each color'): use query_stock with group_by_label='Color'\n"
+             + "- For a TOTAL STOCK SUMMARY ('stock summary', 'total quantity of each item', 'stock in a nutshell'):\n"
+             + "  use query_stock with group_by_label='item_name', order_by_label='quantity', sort_direction='DESC'.\n"
+             + "  This returns ONLY item_name and total quantity — no specification columns. Do not show specs here.\n"
+             + "- For FULL STOCK DETAIL ('full stock details', 'complete stock list', 'all stock with specifications'):\n"
+             + "  use query_stock with NO group_by_label (omit it entirely). This returns every individual stock\n"
+             + "  row with item_name, quantity, and every mapped specification column under its proper label\n"
+             + "  from the spec map (e.g. Color, Chassis Number) — show ALL of these columns, do not aggregate.\n"
              + "- Stock data is ONLY in ai_stock_summary — never use query_table for stock\n"
              + "\n"
              + "=== CRITICAL COLUMN RULES ===\n"
@@ -304,7 +311,7 @@ public class GeminiService {
               },
               {
                 "name": "query_stock",
-                "description": "Query stock items with filters based on spec labels (not column names). Use AFTER calling get_stock_spec_map. For example: filter by Color=RED, or group by Color to get counts per color.",
+                "description": "Query stock items with filters based on spec labels (not column names). Use AFTER calling get_stock_spec_map. Omit group_by_label to get full per-row detail (item_name, quantity, and every mapped specification column under its label — use this for 'full stock details'). Set group_by_label (e.g. 'item_name' or 'Color') to get an aggregated summary instead — returns only the group column plus total quantity and item count, with NO specification columns (use this for 'stock summary' / totals).",
                 "parameters": {
                   "type": "object",
                   "properties": {

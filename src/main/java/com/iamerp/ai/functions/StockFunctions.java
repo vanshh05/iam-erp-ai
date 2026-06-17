@@ -158,55 +158,62 @@ public class StockFunctions {
             }
         }
 
-        // Step 3: GROUP BY
-        String groupClause = "";
+        // Step 3: GROUP BY — resolve once, reused below for SELECT and ORDER BY
+        String groupCol = null;
         if (groupByLabel != null && !groupByLabel.isBlank()) {
-            String groupCol;
             if (FIXED_COLS.contains(groupByLabel.toLowerCase())) {
                 groupCol = groupByLabel.toLowerCase();
             } else {
                 groupCol = labelToCol.getOrDefault(groupByLabel.toLowerCase(),
                            labelToCol.getOrDefault(groupByLabel, null));
             }
-            if (groupCol != null) groupClause = " GROUP BY " + groupCol;
         }
+        String groupClause = (groupCol != null) ? " GROUP BY " + groupCol : "";
 
         // Step 4: ORDER BY
+        // When grouping, SELECT only exposes [groupCol, total_quantity, item_count] — ordering by
+        // the raw "quantity" column here would violate sql_mode=only_full_group_by, so map
+        // quantity/count requests to the aggregate aliases instead of the raw column.
         String orderClause = "";
         String safeSort = "DESC".equalsIgnoreCase(sortDir) ? "DESC" : "ASC";
         if (orderByLabel != null && !orderByLabel.isBlank()) {
+            String ob = orderByLabel.trim().toLowerCase();
             String orderCol;
-            if (FIXED_COLS.contains(orderByLabel.toLowerCase())) {
-                orderCol = orderByLabel.toLowerCase();
-            } else if (orderByLabel.toLowerCase().startsWith("sum(") || orderByLabel.toLowerCase().startsWith("count(")) {
-                orderCol = orderByLabel.toLowerCase();
+            if (groupCol != null) {
+                if (ob.equals("quantity") || ob.startsWith("sum(")) {
+                    orderCol = "total_quantity";
+                } else if (ob.equals("item_count") || ob.startsWith("count(")) {
+                    orderCol = "item_count";
+                } else if (ob.equals(groupByLabel.toLowerCase()) || ob.equals(groupCol)) {
+                    orderCol = groupCol;
+                } else {
+                    orderCol = "total_quantity"; // sensible default for a grouped summary
+                }
+            } else if (FIXED_COLS.contains(ob)) {
+                orderCol = ob;
+            } else if (ob.startsWith("sum(") || ob.startsWith("count(")) {
+                orderCol = ob;
             } else {
-                orderCol = labelToCol.getOrDefault(orderByLabel.toLowerCase(),
-                           labelToCol.getOrDefault(orderByLabel, null));
+                orderCol = labelToCol.getOrDefault(ob, labelToCol.getOrDefault(orderByLabel, null));
             }
             if (orderCol != null) orderClause = " ORDER BY " + orderCol + " " + safeSort;
         }
 
         int safeLimit = Math.min(Math.max(limit <= 0 ? 200 : limit, 1), 2000);
 
-        // Step 5: Determine SELECT — only select non-null spec columns that are mapped
-        // Build SELECT: fixed cols + all mapped spec cols
-        List<String> selectCols = new ArrayList<>();
-        selectCols.add("item_name");
-        selectCols.add("quantity");
-        for (String specCol : SPEC_COLS) {
-            if (colToLabel.containsKey(specCol)) selectCols.add(specCol);
-        }
-        String selectClause = String.join(", ", selectCols);
-
-        // If grouping, wrap quantity in SUM
-        if (!groupClause.isEmpty()) {
-            selectClause = selectCols.get(0); // item_name or group col
-            if (!groupByLabel.isBlank()) {
-                String groupCol2 = labelToCol.getOrDefault(groupByLabel.toLowerCase(),
-                                   labelToCol.getOrDefault(groupByLabel, groupByLabel.toLowerCase()));
-                selectClause = groupCol2 + ", SUM(quantity) as total_quantity, COUNT(*) as item_count";
+        // Step 5: SELECT — full row detail (item_name, quantity, every mapped spec column)
+        // when not grouping; just the group column plus aggregates when grouping.
+        String selectClause;
+        if (groupCol != null) {
+            selectClause = groupCol + ", SUM(quantity) as total_quantity, COUNT(*) as item_count";
+        } else {
+            List<String> selectCols = new ArrayList<>();
+            selectCols.add("item_name");
+            selectCols.add("quantity");
+            for (String specCol : SPEC_COLS) {
+                if (colToLabel.containsKey(specCol)) selectCols.add(specCol);
             }
+            selectClause = String.join(", ", selectCols);
         }
 
         String sql = "SELECT " + selectClause + " FROM ai_stock_summary"
