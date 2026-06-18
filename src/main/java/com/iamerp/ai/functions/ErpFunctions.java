@@ -285,7 +285,7 @@ public class ErpFunctions {
     public String getOverdueParties(int minOverdueDays, String companyId) {
         List<Map<String, String>> filters = List.of(
             Map.of("column", "overdue_days",  "operator", ">=", "value", String.valueOf(minOverdueDays)),
-            Map.of("column", "balance_type",  "operator", "=",  "value", "DR")
+            Map.of("column", "balance_type",  "operator", "=",  "value", "Debit")
         );
         return queryTable("ai_party_status", filters,
             "party_name,outstanding_balance,balance_type,overdue_days,last_bill_date,contact_number",

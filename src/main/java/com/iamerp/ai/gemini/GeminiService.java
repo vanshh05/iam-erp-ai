@@ -89,7 +89,7 @@ public class GeminiService {
              + "TABLE: ai_party_status  — customer/supplier master\n"
              + "  party_name, party_type (Customer/Supplier), sub_party_type (Buyer/Dealer/etc)\n"
              + "  contact_number, email, address, gstin\n"
-             + "  outstanding_balance, balance_type (DR=they owe us / CR=we owe them)\n"
+             + "  outstanding_balance, balance_type (Debit=they owe us / Credit=we owe them)\n"
              + "  last_bill_date, last_bill_amount, total_business_ytd, credit_limit, overdue_days\n"
              + "\n"
              + "TABLE: ai_stock_summary  — warehouse stock (one row per item unit)\n"
@@ -164,26 +164,26 @@ public class GeminiService {
              + "RECEIVABLE  = outstanding_balance of Customers (Debtors)\n"
              + "            → query ai_party_status, filter party_type = 'Customer'\n"
              + "            → show: party_name, sub_party_type, outstanding_balance, balance_type\n"
-             + "            → 'total receivable' = SUM(outstanding_balance) WHERE party_type='Customer' AND balance_type='DR'\n"
+             + "            → 'total receivable' = SUM(outstanding_balance) WHERE party_type='Customer' AND balance_type='Debit'\n"
              + "\n"
              + "PAYABLE     = outstanding_balance of Suppliers (Creditors)\n"
              + "            → query ai_party_status, filter party_type = 'Supplier'\n"
              + "            → show: party_name, sub_party_type, outstanding_balance, balance_type\n"
-             + "            → 'total payable' = SUM(outstanding_balance) WHERE party_type='Supplier' AND balance_type='CR'\n"
+             + "            → 'total payable' = SUM(outstanding_balance) WHERE party_type='Supplier' AND balance_type='Credit'\n"
              + "\n"
              + "LEDGER BALANCE of a party = outstanding_balance + balance_type of that party\n"
              + "            → query ai_party_status, filter party_name LIKE <name>\n"
              + "            → show outstanding_balance and balance_type together\n"
-             + "            → balance_type DR means the party owes US (they are a debtor)\n"
-             + "            → balance_type CR means WE owe them (they are a creditor)\n"
+             + "            → balance_type Debit means the party owes US (they are a debtor)\n"
+             + "            → balance_type Credit means WE owe them (they are a creditor)\n"
              + "\n"
              + "EXAMPLES:\n"
              + "  'show all debtors'           → party_type = 'Customer'\n"
              + "  'show all creditors'         → party_type = 'Supplier'\n"
-             + "  'total receivable'           → SUM outstanding_balance WHERE party_type='Customer' AND balance_type='DR'\n"
-             + "  'total payable'              → SUM outstanding_balance WHERE party_type='Supplier' AND balance_type='CR'\n"
+             + "  'total receivable'           → SUM outstanding_balance WHERE party_type='Customer' AND balance_type='Debit'\n"
+             + "  'total payable'              → SUM outstanding_balance WHERE party_type='Supplier' AND balance_type='Credit'\n"
              + "  'ledger balance of Raj'      → party_name LIKE 'Raj', show outstanding_balance + balance_type\n"
-             + "  'how much Raj owes us'       → party_name LIKE 'Raj', balance_type='DR'\n"
+             + "  'how much Raj owes us'       → party_name LIKE 'Raj', balance_type='Debit'\n"
              + "  'receivable from Raj Traders'→ party_name LIKE 'Raj', party_type='Customer', outstanding_balance\n"
              + "\n"
              + "For debtor/creditor LIST queries ALWAYS select EXACTLY these 4 columns and NO others:\n"
@@ -293,7 +293,7 @@ public class GeminiService {
               },
               {
                 "name": "get_overdue_parties",
-                "description": "Get all parties with overdue payments (balance_type DR and overdue_days > threshold).",
+                "description": "Get all parties with overdue payments (balance_type Debit and overdue_days > threshold).",
                 "parameters": {
                   "type": "object",
                   "properties": {
@@ -356,14 +356,15 @@ public class GeminiService {
     // ─── Main chat entry point ────────────────────────────────────────────────
     public String chat(String userMessage,
                        List<Map<String, Object>> conversationHistory,
-                       String language) {
+                       String language,
+                       String companyId) {
         String langTag = "hi".equalsIgnoreCase(language) ? "[LANG:HI] " : "[LANG:EN] ";
         userMessage = langTag + userMessage;
         try {
             ObjectNode requestBody = buildRequestBody(userMessage, conversationHistory, true);
             String responseStr = callGemini(requestBody);
             JsonNode response  = mapper.readTree(responseStr);
-            return processResponse(response, userMessage, conversationHistory, 0);
+            return processResponse(response, userMessage, conversationHistory, 0, companyId);
         } catch (Exception e) {
             log.error("[Gemini] Chat error: {}", e.getMessage());
             return "Sorry, I encountered an error: " + e.getMessage();
@@ -376,7 +377,8 @@ public class GeminiService {
     private String processResponse(JsonNode response,
                                    String originalMessage,
                                    List<Map<String, Object>> history,
-                                   int depth) throws Exception {
+                                   int depth,
+                                   String companyId) throws Exception {
         if (depth > MAX_TOOL_DEPTH) {
             // Safety cap reached — return whatever text we have rather than looping forever
             JsonNode cands = response.path("candidates");
@@ -440,7 +442,7 @@ public class GeminiService {
         ArrayNode resultParts = mapper.createArrayNode();
         for (JsonNode tc : toolCalls) {
             String funcName = tc.get("name").asText();
-            String result   = executeFunctionCall(funcName, tc.path("args"));
+            String result   = executeFunctionCall(funcName, tc.path("args"), companyId);
             log.info("[Gemini] Tool result size={}chars", result.length());
 
             ObjectNode fp = mapper.createObjectNode();
@@ -469,7 +471,7 @@ public class GeminiService {
         followUp.set("generationConfig", cfg);
 
         String fr2 = callGemini(followUp);
-        return processResponse(mapper.readTree(fr2), originalMessage, history, depth + 1);
+        return processResponse(mapper.readTree(fr2), originalMessage, history, depth + 1, companyId);
     }
 
     // ─── Build request body ───────────────────────────────────────────────────
@@ -518,8 +520,7 @@ public class GeminiService {
     }
 
     // ─── Execute function calls ───────────────────────────────────────────────
-    private String executeFunctionCall(String funcName, JsonNode args) {
-        String companyId = "HOTAGE INDIA";
+    private String executeFunctionCall(String funcName, JsonNode args, String companyId) {
         return switch (funcName) {
             case "query_table" -> {
                 List<Map<String, String>> filters = new ArrayList<>();
