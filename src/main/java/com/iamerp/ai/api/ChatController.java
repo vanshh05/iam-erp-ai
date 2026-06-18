@@ -43,8 +43,7 @@ public class ChatController {
                 }
             }
 
-            String reply = geminiService.chat(message.trim(), history, language);
-            response.put("success", true);
+String reply = geminiService.chat(message.trim(), history, language, companyId);            response.put("success", true);
             response.put("reply", reply);
             return ResponseEntity.ok(response);
 
