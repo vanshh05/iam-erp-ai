@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.*;
 import com.iamerp.ai.functions.ErpFunctions;
 import com.iamerp.ai.functions.StockFunctions;
+import com.iamerp.ai.functions.DispatchFunctions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,14 +27,16 @@ public class GeminiService {
 
     private final ErpFunctions erpFunctions;
     private final StockFunctions stockFunctions;
+    private final DispatchFunctions dispatchFunctions;
     private final ObjectMapper mapper = new ObjectMapper();
     private final WebClient webClient = WebClient.builder()
             .codecs(c -> c.defaultCodecs().maxInMemorySize(4 * 1024 * 1024))
             .build();
 
-    public GeminiService(ErpFunctions erpFunctions, StockFunctions stockFunctions) {
+    public GeminiService(ErpFunctions erpFunctions, StockFunctions stockFunctions, DispatchFunctions dispatchFunctions) {
         this.erpFunctions = erpFunctions;
         this.stockFunctions = stockFunctions;
+        this.dispatchFunctions = dispatchFunctions;
     }
 
     // ─── System Prompt ────────────────────────────────────────────────────────
@@ -118,7 +121,31 @@ public class GeminiService {
              + "  from the spec map (e.g. Color, Chassis Number) — show ALL of these columns, do not aggregate.\n"
              + "- Stock data is ONLY in ai_stock_summary — never use query_table for stock\n"
              + "\n"
-             + "=== CRITICAL COLUMN RULES ===\n"
+             + "TABLE: ai_dispatch_summary  — vehicles dispatched/sold to parties (one row per dispatched unit)\n"
+             + "  item_name VARCHAR, party_name VARCHAR, invoice_no VARCHAR, invoice_date DATE, quantity DECIMAL\n"
+             + "  spec_value_1 through spec_value_20 — generic specification columns (color, chassis, motor, etc.)\n"
+             + "  IMPORTANT: spec_value_N columns have DIFFERENT meanings per company.\n"
+             + "  ALWAYS call get_stock_spec_map first before any dispatch detail query.\n"
+             + "\n"
+             + "=== DISPATCH QUERY RULES ===\n"
+             + "- 'dispatch' = vehicles dispatched/sold and invoiced to parties from ai_dispatch_summary\n"
+             + "- Dispatch spec columns use the SAME mapping as stock — reuse get_stock_spec_map (reads ai_stock_spec_map)\n"
+             + "- For SUMMARY queries ('today's dispatch', 'month dispatch', 'total dispatch'):\n"
+             + "  use get_dispatch_summary tool with period='today'|'month'|'all'.\n"
+             + "  Response includes: total vehicles dispatched, unique parties served, breakdown by item.\n"
+             + "  A party with 3 invoices in a month counts as 1 unique party — do NOT double count.\n"
+             + "  Do NOT call get_stock_spec_map for these summary queries.\n"
+             + "- For FULL DETAIL ('complete dispatch list', 'all dispatches with specifications', 'find chassis X'):\n"
+             + "  FIRST call get_stock_spec_map → then call query_dispatch or search_dispatch_by_spec_value.\n"
+             + "  Full detail returns: item_name, party_name, invoice_no, invoice_date, quantity,\n"
+             + "  and all POPULATED spec columns under their proper human label (e.g. Color, Chassis Number,\n"
+             + "  Motor Number, Controller Number, Battery Model). Empty/null/-- spec values are hidden automatically.\n"
+             + "- For PARTY-SPECIFIC dispatch ('dispatch to Raj', 'how many vehicles sent to ABC trader'):\n"
+             + "  use query_dispatch with filter party_name LIKE <name>.\n"
+             + "- For SPEC SEARCHES ('find motor number X', 'find chassis Y in dispatched vehicles'):\n"
+             + "  get_stock_spec_map first → search_dispatch_by_spec_value.\n"
+             + "- Dispatch data is ONLY in ai_dispatch_summary — never use query_table for dispatch\n"
+             + "\n"
              + "COLLECTIONS (money IN): total_collection / cash_collection / bank_collection in ai_daily_summary\n"
              + "  Individual transactions → ai_collection_summary (receipt_date, party_name, amount, receipt_mode)\n"
              + "PAYMENTS (money OUT): total_payment / cash_payment / bank_payment in ai_daily_summary\n"
@@ -354,6 +381,57 @@ public class GeminiService {
                   },
                   "required": ["search_value"]
                 }
+              },
+              {
+                "name": "get_dispatch_summary",
+                "description": "Get a high-level dispatch summary for a time period. Returns total vehicles dispatched, unique parties served (each counted once regardless of invoice count), and breakdown by item. Use for 'today dispatch', 'month dispatch', 'total dispatch', 'how many vehicles dispatched'. Do NOT call get_stock_spec_map before this — no spec labels needed for summaries.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "period": {
+                      "type": "string",
+                      "enum": ["today", "month", "all"],
+                      "description": "'today' = today only | 'month' = current calendar month | 'all' = all-time total"
+                    }
+                  },
+                  "required": ["period"]
+                }
+              },
+              {
+                "name": "query_dispatch",
+                "description": "Query dispatch records with optional filters, grouping, and ordering. Use AFTER calling get_stock_spec_map (shared with stock). Omit group_by_label for full per-row detail (item_name, party_name, invoice_no, invoice_date, quantity, and every populated+mapped spec column under its proper label). Set group_by_label to aggregate (e.g. group by item_name gives total per item). Spec values that are empty or '--' are hidden automatically.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "filters": {
+                      "type": "array",
+                      "description": "Optional filters. Each item: {label: column or spec label, operator: '='|'!='|'LIKE'|'>'|'<'|'>='|'<='|'IN', value: string}. Date filter example: {label:'invoice_date', operator:'>=', value:'2026-04-01'}",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label":    { "type": "string" },
+                          "operator": { "type": "string" },
+                          "value":    { "type": "string" }
+                        }
+                      }
+                    },
+                    "group_by_label": { "type": "string", "description": "Column or spec label to group by (e.g. 'item_name', 'party_name', 'Color'). Omit for full detail rows." },
+                    "order_by_label": { "type": "string", "description": "Column or spec label to order by (e.g. 'invoice_date', 'quantity', 'total_quantity')." },
+                    "sort_direction": { "type": "string", "enum": ["ASC", "DESC"], "description": "Sort direction." },
+                    "limit":          { "type": "integer", "description": "Max rows to return. Default 500." }
+                  }
+                }
+              },
+              {
+                "name": "search_dispatch_by_spec_value",
+                "description": "Search across ALL mapped dispatch spec columns for a value. Use when user asks to find a specific chassis number, motor number, controller number, battery model, or any other specification in dispatched vehicles. Call get_stock_spec_map first (shared with stock).",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "search_value": { "type": "string", "description": "Value to search for across all dispatch spec columns (e.g. a chassis number, motor number)." }
+                  },
+                  "required": ["search_value"]
+                }
               }
             ]
           }
@@ -530,66 +608,84 @@ public class GeminiService {
 
     // ─── Execute function calls ───────────────────────────────────────────────
     private String executeFunctionCall(String funcName, JsonNode args, String companyId) {
-      try {
-        if ("query_table".equals(funcName)) {
-          List<Map<String, String>> filters = new ArrayList<>();
-          JsonNode filtersNode = args.path("filters");
-          if (filtersNode.isArray()) {
-            for (JsonNode f : filtersNode) {
-              Map<String, String> filter = new HashMap<>();
-              filter.put("column", f.path("column").asText(""));
-              filter.put("operator", f.path("operator").asText("="));
-              filter.put("value", f.path("value").asText(""));
-              filters.add(filter);
+        return switch (funcName) {
+            case "query_table" -> {
+                List<Map<String, String>> filters = new ArrayList<>();
+                JsonNode filtersNode = args.path("filters");
+                if (filtersNode.isArray()) {
+                    for (JsonNode f : filtersNode) {
+                        Map<String, String> filter = new HashMap<>();
+                        filter.put("column",   f.path("column").asText(""));
+                        filter.put("operator", f.path("operator").asText("="));
+                        filter.put("value",    f.path("value").asText(""));
+                        filters.add(filter);
+                    }
+                }
+                yield erpFunctions.queryTable(
+                    args.path("table_name").asText(""),
+                    filters,
+                    args.path("select_columns").asText("all"),
+                    args.path("group_by").asText(null),
+                    args.path("order_by").asText(null),
+                    args.path("sort_direction").asText("DESC"),
+                    args.path("limit").asInt(2000),
+                    companyId
+                );
             }
-          }
-          return erpFunctions.queryTable(
-            args.path("table_name").asText(""),
-            filters,
-            args.path("select_columns").asText("all"),
-            args.path("group_by").asText(null),
-            args.path("order_by").asText(null),
-            args.path("sort_direction").asText("DESC"),
-            args.path("limit").asInt(2000),
-            companyId
-          );
-        } else if ("get_table_schema".equals(funcName)) {
-          return erpFunctions.getTableSchema(args.path("table_name").asText("all"));
-        } else if ("get_today_summary".equals(funcName)) {
-          return erpFunctions.getTodaySummary(companyId);
-        } else if ("get_overdue_parties".equals(funcName)) {
-          return erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
-        } else if ("get_stock_spec_map".equals(funcName)) {
-          return stockFunctions.getSpecMap(companyId);
-        } else if ("query_stock".equals(funcName)) {
-          List<Map<String, String>> filters = new ArrayList<>();
-          JsonNode filtersNode = args.path("filters");
-          if (filtersNode.isArray()) {
-            for (JsonNode f : filtersNode) {
-              Map<String, String> filter = new HashMap<>();
-              filter.put("label", f.path("label").asText(""));
-              filter.put("operator", f.path("operator").asText("="));
-              filter.put("value", f.path("value").asText(""));
-              filters.add(filter);
+            case "get_table_schema"    -> erpFunctions.getTableSchema(args.path("table_name").asText("all"));
+            case "get_today_summary"   -> erpFunctions.getTodaySummary(companyId);
+            case "get_overdue_parties" -> erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
+            case "get_stock_spec_map"  -> stockFunctions.getSpecMap(companyId);
+            case "query_stock" -> {
+                List<Map<String, String>> filters = new ArrayList<>();
+                JsonNode filtersNode = args.path("filters");
+                if (filtersNode.isArray()) {
+                    for (JsonNode f : filtersNode) {
+                        Map<String, String> filter = new HashMap<>();
+                        filter.put("label",    f.path("label").asText(""));
+                        filter.put("operator", f.path("operator").asText("="));
+                        filter.put("value",    f.path("value").asText(""));
+                        filters.add(filter);
+                    }
+                }
+                yield stockFunctions.queryStock(
+                    companyId,
+                    filters,
+                    args.path("group_by_label").asText(null),
+                    args.path("order_by_label").asText(null),
+                    args.path("sort_direction").asText("DESC"),
+                    args.path("limit").asInt(200)
+                );
             }
-          }
-          return stockFunctions.queryStock(
-            companyId,
-            filters,
-            args.path("group_by_label").asText(null),
-            args.path("order_by_label").asText(null),
-            args.path("sort_direction").asText("DESC"),
-            args.path("limit").asInt(200)
-          );
-        } else if ("search_stock_by_spec_value".equals(funcName)) {
-          return stockFunctions.searchBySpecValue(companyId, args.path("search_value").asText(""));
-        } else {
-          return "Function '" + funcName + "' not found.";
-        }
-      } catch (Exception e) {
-        log.error("[Gemini] executeFunctionCall error: {}", e.getMessage());
-        return "Error executing function '" + funcName + "': " + e.getMessage();
-      }
+            case "search_stock_by_spec_value" ->
+                stockFunctions.searchBySpecValue(companyId, args.path("search_value").asText(""));
+            case "get_dispatch_summary" ->
+                dispatchFunctions.getDispatchSummary(companyId, args.path("period").asText("all"));
+            case "query_dispatch" -> {
+                List<Map<String, String>> filters = new ArrayList<>();
+                JsonNode filtersNode = args.path("filters");
+                if (filtersNode.isArray()) {
+                    for (JsonNode f : filtersNode) {
+                        Map<String, String> filter = new HashMap<>();
+                        filter.put("label",    f.path("label").asText(""));
+                        filter.put("operator", f.path("operator").asText("="));
+                        filter.put("value",    f.path("value").asText(""));
+                        filters.add(filter);
+                    }
+                }
+                yield dispatchFunctions.queryDispatch(
+                    companyId,
+                    filters,
+                    args.path("group_by_label").asText(null),
+                    args.path("order_by_label").asText(null),
+                    args.path("sort_direction").asText("DESC"),
+                    args.path("limit").asInt(500)
+                );
+            }
+            case "search_dispatch_by_spec_value" ->
+                dispatchFunctions.searchDispatchBySpecValue(companyId, args.path("search_value").asText(""));
+            default -> "Function '" + funcName + "' not found.";
+        };
     }
 
     // ─── HTTP call to Gemini ──────────────────────────────────────────────────
