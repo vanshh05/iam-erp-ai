@@ -530,59 +530,66 @@ public class GeminiService {
 
     // ─── Execute function calls ───────────────────────────────────────────────
     private String executeFunctionCall(String funcName, JsonNode args, String companyId) {
-        return switch (funcName) {
-            case "query_table" -> {
-                List<Map<String, String>> filters = new ArrayList<>();
-                JsonNode filtersNode = args.path("filters");
-                if (filtersNode.isArray()) {
-                    for (JsonNode f : filtersNode) {
-                        Map<String, String> filter = new HashMap<>();
-                        filter.put("column",   f.path("column").asText(""));
-                        filter.put("operator", f.path("operator").asText("="));
-                        filter.put("value",    f.path("value").asText(""));
-                        filters.add(filter);
-                    }
-                }
-                yield erpFunctions.queryTable(
-                    args.path("table_name").asText(""),
-                    filters,
-                    args.path("select_columns").asText("all"),
-                    args.path("group_by").asText(null),
-                    args.path("order_by").asText(null),
-                    args.path("sort_direction").asText("DESC"),
-                    args.path("limit").asInt(2000),
-                    companyId
-                );
+      try {
+        if ("query_table".equals(funcName)) {
+          List<Map<String, String>> filters = new ArrayList<>();
+          JsonNode filtersNode = args.path("filters");
+          if (filtersNode.isArray()) {
+            for (JsonNode f : filtersNode) {
+              Map<String, String> filter = new HashMap<>();
+              filter.put("column", f.path("column").asText(""));
+              filter.put("operator", f.path("operator").asText("="));
+              filter.put("value", f.path("value").asText(""));
+              filters.add(filter);
             }
-            case "get_table_schema"    -> erpFunctions.getTableSchema(args.path("table_name").asText("all"));
-            case "get_today_summary"   -> erpFunctions.getTodaySummary(companyId);
-            case "get_overdue_parties" -> erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
-            case "get_stock_spec_map"  -> stockFunctions.getSpecMap(companyId);
-            case "query_stock" -> {
-                List<Map<String, String>> filters = new ArrayList<>();
-                JsonNode filtersNode = args.path("filters");
-                if (filtersNode.isArray()) {
-                    for (JsonNode f : filtersNode) {
-                        Map<String, String> filter = new HashMap<>();
-                        filter.put("label",    f.path("label").asText(""));
-                        filter.put("operator", f.path("operator").asText("="));
-                        filter.put("value",    f.path("value").asText(""));
-                        filters.add(filter);
-                    }
-                }
-                yield stockFunctions.queryStock(
-                    companyId,
-                    filters,
-                    args.path("group_by_label").asText(null),
-                    args.path("order_by_label").asText(null),
-                    args.path("sort_direction").asText("DESC"),
-                    args.path("limit").asInt(200)
-                );
+          }
+          return erpFunctions.queryTable(
+            args.path("table_name").asText(""),
+            filters,
+            args.path("select_columns").asText("all"),
+            args.path("group_by").asText(null),
+            args.path("order_by").asText(null),
+            args.path("sort_direction").asText("DESC"),
+            args.path("limit").asInt(2000),
+            companyId
+          );
+        } else if ("get_table_schema".equals(funcName)) {
+          return erpFunctions.getTableSchema(args.path("table_name").asText("all"));
+        } else if ("get_today_summary".equals(funcName)) {
+          return erpFunctions.getTodaySummary(companyId);
+        } else if ("get_overdue_parties".equals(funcName)) {
+          return erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
+        } else if ("get_stock_spec_map".equals(funcName)) {
+          return stockFunctions.getSpecMap(companyId);
+        } else if ("query_stock".equals(funcName)) {
+          List<Map<String, String>> filters = new ArrayList<>();
+          JsonNode filtersNode = args.path("filters");
+          if (filtersNode.isArray()) {
+            for (JsonNode f : filtersNode) {
+              Map<String, String> filter = new HashMap<>();
+              filter.put("label", f.path("label").asText(""));
+              filter.put("operator", f.path("operator").asText("="));
+              filter.put("value", f.path("value").asText(""));
+              filters.add(filter);
             }
-            case "search_stock_by_spec_value" ->
-                stockFunctions.searchBySpecValue(companyId, args.path("search_value").asText(""));
-            default -> "Function '" + funcName + "' not found.";
-        };
+          }
+          return stockFunctions.queryStock(
+            companyId,
+            filters,
+            args.path("group_by_label").asText(null),
+            args.path("order_by_label").asText(null),
+            args.path("sort_direction").asText("DESC"),
+            args.path("limit").asInt(200)
+          );
+        } else if ("search_stock_by_spec_value".equals(funcName)) {
+          return stockFunctions.searchBySpecValue(companyId, args.path("search_value").asText(""));
+        } else {
+          return "Function '" + funcName + "' not found.";
+        }
+      } catch (Exception e) {
+        log.error("[Gemini] executeFunctionCall error: {}", e.getMessage());
+        return "Error executing function '" + funcName + "': " + e.getMessage();
+      }
     }
 
     // ─── HTTP call to Gemini ──────────────────────────────────────────────────
