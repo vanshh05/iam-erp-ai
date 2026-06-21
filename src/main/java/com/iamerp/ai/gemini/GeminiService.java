@@ -31,6 +31,11 @@ public class GeminiService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final WebClient webClient = WebClient.builder()
             .codecs(c -> c.defaultCodecs().maxInMemorySize(4 * 1024 * 1024))
+            .clientConnector(new org.springframework.http.client.reactive.ReactorClientHttpConnector(
+                reactor.netty.http.client.HttpClient.create()
+                    .option(io.netty.channel.ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
+                    .responseTimeout(java.time.Duration.ofSeconds(90))
+            ))
             .build();
 
     public GeminiService(ErpFunctions erpFunctions, StockFunctions stockFunctions, DispatchFunctions dispatchFunctions) {
@@ -260,7 +265,12 @@ public class GeminiService {
              + "- If tool returns 'No data found' — say so truthfully\n"
              + "\n"
              + "=== LANGUAGE ===\n"
-             + "[LANG:EN] → respond in English | [LANG:HI] → respond in Hindi\n"
+             + "[LANG:EN] → respond in English\n"
+             + "[LANG:HI] → respond in Hindi or Hinglish (mix of Hindi and English)\n"
+             + "If the user writes in Hinglish (e.g. 'aaj ka sales batao' or 'kitna stock hai'), respond in\n"
+             + "the same Hinglish style — natural, conversational, mixing Hindi and English naturally.\n"
+             + "Numbers, amounts, dates, and proper nouns (party names, item names) always stay in English.\n"
+             + "NEVER refuse to answer because of the language — always attempt a response.\n"
              + "\n"
              + "=== OUTPUT FORMAT ===\n"
              + "- Currency: ₹ with Indian format (₹1,24,500.00)\n"
@@ -453,6 +463,9 @@ public class GeminiService {
                        List<Map<String, Object>> conversationHistory,
                        String language,
                        String companyId) {
+        // Language is set by the user's toggle (hi/en).
+        // Hinglish (Hindi written in Roman script) comes in as 'hi' from the toggle
+        // and Gemini handles it naturally via the system prompt instruction.
         String langTag = "hi".equalsIgnoreCase(language) ? "[LANG:HI] " : "[LANG:EN] ";
         userMessage = langTag + userMessage;
         try {
@@ -562,7 +575,7 @@ public class GeminiService {
         followUp.set("tools", buildToolDefinitions());
         ObjectNode cfg = mapper.createObjectNode();
         cfg.put("temperature", 0.1);
-        cfg.put("maxOutputTokens", 65536);
+        cfg.put("maxOutputTokens", 8192);
         followUp.set("generationConfig", cfg);
 
         String fr2 = callGemini(followUp);
@@ -582,7 +595,7 @@ public class GeminiService {
         if (includeTools) body.set("tools", buildToolDefinitions());
         ObjectNode cfg = mapper.createObjectNode();
         cfg.put("temperature", 0.1);
-        cfg.put("maxOutputTokens", 65536);
+        cfg.put("maxOutputTokens", 8192);
         body.set("generationConfig", cfg);
         return body;
     }
