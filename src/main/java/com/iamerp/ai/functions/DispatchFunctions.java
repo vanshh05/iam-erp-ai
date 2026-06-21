@@ -82,18 +82,38 @@ public class DispatchFunctions {
     // ─── 2. DISPATCH SUMMARY — today / this month / all-time ─────────────────
     // period: "today" | "month" | "all"
     // Returns: total vehicles dispatched, unique parties count, breakdown by item
-    public String getDispatchSummary(String companyId, String period) {
-        String dateFilter = switch (period.toLowerCase()) {
-            case "today" -> " AND DATE(invoice_date) = CURDATE()";
-            case "month" -> " AND YEAR(invoice_date) = YEAR(CURDATE()) AND MONTH(invoice_date) = MONTH(CURDATE())";
-            default      -> ""; // all-time
-        };
+    // period: "today" | "month" | "all"
+    // month: 1-12 for a specific month (0 = current month), only used when period="month"
+    // year:  e.g. 2026 (0 = current year), only used when period="month"
+    public String getDispatchSummary(String companyId, String period, int month, int year) {
+        String dateFilter;
+        String periodLabel;
 
-        String periodLabel = switch (period.toLowerCase()) {
-            case "today" -> "Today";
-            case "month" -> "This Month";
-            default      -> "Total (All Time)";
-        };
+        String periodLower = period.toLowerCase();
+        if (periodLower.equals("today")) {
+            dateFilter  = " AND DATE(invoice_date) = CURDATE()";
+            periodLabel = "Today";
+        } else if (periodLower.equals("month")) {
+            if (month > 0 && year > 0) {
+                // Specific month and year requested — e.g. May 2026
+                dateFilter  = " AND YEAR(invoice_date) = " + year + " AND MONTH(invoice_date) = " + month;
+                periodLabel = java.time.Month.of(month).getDisplayName(
+                    java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH) + " " + year;
+            } else if (month > 0) {
+                // Specific month, current year
+                int currentYear = java.time.LocalDate.now().getYear();
+                dateFilter  = " AND YEAR(invoice_date) = " + currentYear + " AND MONTH(invoice_date) = " + month;
+                periodLabel = java.time.Month.of(month).getDisplayName(
+                    java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH) + " " + currentYear;
+            } else {
+                // Default: current calendar month
+                dateFilter  = " AND YEAR(invoice_date) = YEAR(CURDATE()) AND MONTH(invoice_date) = MONTH(CURDATE())";
+                periodLabel = "This Month";
+            }
+        } else {
+            dateFilter  = ""; // all-time
+            periodLabel = "Total (All Time)";
+        }
 
         String sql = "SELECT "
             + "  COUNT(*) AS total_entries, "
