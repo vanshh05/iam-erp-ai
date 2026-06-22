@@ -65,12 +65,12 @@ public class ExportController {
         "bill_no", "summary_date", "bill_date", "receipt_date", "payment_date"
     );
 
-    public ExportController(DataSource dataSource, CompanyResolver companyResolver) {
+    public ExportController(DataSource dataSource, Companyresolver companyResolver) {
         this.dataSource = dataSource;
         this.companyResolver = companyResolver;
     }
 
-    private final CompanyResolver companyResolver;
+    private final Companyresolver companyResolver;
 
     /**
      * Direct DB export endpoint — bypasses Gemini entirely.
