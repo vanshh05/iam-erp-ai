@@ -3,12 +3,10 @@ package com.iamerp.ai.api;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.iamerp.ai.model.User;
+import com.iamerp.ai.security.CompanyResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.sql.DataSource;
@@ -67,18 +65,12 @@ public class ExportController {
         "bill_no", "summary_date", "bill_date", "receipt_date", "payment_date"
     );
 
-    public ExportController(DataSource dataSource) {
+    public ExportController(DataSource dataSource, CompanyResolver companyResolver) {
         this.dataSource = dataSource;
+        this.companyResolver = companyResolver;
     }
 
-    /** Company id always comes from the verified token, never a request param. */
-    private String currentCompanyId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof User user) {
-            return user.getCompanyId();
-        }
-        return null;
-    }
+    private final CompanyResolver companyResolver;
 
     /**
      * Direct DB export endpoint — bypasses Gemini entirely.
@@ -93,6 +85,7 @@ public class ExportController {
     @GetMapping("/export")
     public ResponseEntity<Map<String, Object>> exportData(
             @RequestParam String table,
+            @RequestParam(required = false) String company_id,  // honored only for admins
             @RequestParam(required = false) String filter_col,
             @RequestParam(required = false) String filter_val,
             @RequestParam(required = false) String order_by,
@@ -102,15 +95,21 @@ public class ExportController {
     ) {
         Map<String, Object> response = new HashMap<>();
 
-        String company_id = currentCompanyId();
-        if (company_id == null) {
+        if (companyResolver.currentUser() == null) {
             response.put("success", false);
             response.put("error", "Unauthorized");
             return ResponseEntity.status(401).body(response);
         }
 
+        String company = companyResolver.resolve(company_id);
+        if (company == null) {
+            response.put("success", false);
+            response.put("error", "No company selected.");
+            return ResponseEntity.badRequest().body(response);
+        }
+
         log.info("[Export] table={} company_id='{}' filter_col={} filter_val={} order_by={} select_cols={} limit={}",
-                 table, company_id, filter_col, filter_val, order_by, select_cols, limit);
+                 table, company, filter_col, filter_val, order_by, select_cols, limit);
 
         // Build SELECT clause — use explicit columns if provided, else SELECT *
         String selectClause = "*";
@@ -164,7 +163,7 @@ public class ExportController {
                 .append(" FROM ").append(table).append(" WHERE company_id = ?");
 
             List<Object> params = new ArrayList<>();
-            params.add(company_id);
+            params.add(company);
 
             if (safeFilterCol != null && filter_val != null && !filter_val.isBlank()) {
                 if (filter_val.matches("\\d{4}-\\d{2}-\\d{2},\\d{4}-\\d{2}-\\d{2}")) {
@@ -217,7 +216,7 @@ public class ExportController {
                 rows.add(row);
             }
 
-            log.info("[Export] Returned {} rows for company_id='{}'", rows.size(), company_id);
+            log.info("[Export] Returned {} rows for company_id='{}'", rows.size(), company);
 
             response.put("success", true);
             response.put("table", table);

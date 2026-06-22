@@ -1,10 +1,8 @@
 package com.iamerp.ai.api;
 
 import com.iamerp.ai.gemini.GeminiService;
-import com.iamerp.ai.model.User;
+import com.iamerp.ai.security.CompanyResolver;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -14,18 +12,11 @@ import java.util.*;
 public class ChatController {
 
     private final GeminiService geminiService;
+    private final CompanyResolver companyResolver;
 
-    public ChatController(GeminiService geminiService) {
+    public ChatController(GeminiService geminiService, CompanyResolver companyResolver) {
         this.geminiService = geminiService;
-    }
-
-    /** Company id always comes from the verified token, never the request body. */
-    private String currentCompanyId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof User user) {
-            return user.getCompanyId();
-        }
-        return null;
+        this.companyResolver = companyResolver;
     }
 
     @PostMapping("/chat")
@@ -34,12 +25,22 @@ public class ChatController {
         try {
             String message   = (String) request.get("message");
             String language  = (String) request.getOrDefault("language", "en");
-            String companyId = currentCompanyId();
 
-            if (companyId == null) {
+            // company comes from token for owners; admins may select one (sent as company_id)
+            String requested = request.get("company_id") == null ? null : request.get("company_id").toString();
+            String companyId = companyResolver.resolve(requested);
+
+            if (companyResolver.currentUser() == null) {
                 response.put("success", false);
                 response.put("error", "Unauthorized");
                 return ResponseEntity.status(401).body(response);
+            }
+
+            // Admin hasn't picked a company yet
+            if (companyId == null) {
+                response.put("success", true);
+                response.put("reply", "Please select a company from the dropdown to view its data.");
+                return ResponseEntity.ok(response);
             }
 
             if (message == null || message.isBlank()) {

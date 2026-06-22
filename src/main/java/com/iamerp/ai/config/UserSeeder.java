@@ -34,6 +34,7 @@ public class UserSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        seed("admin",  "admin@123",  "System Admin", "ADMIN", "ADMIN", "Ayaam ERP Admin");
         seed("hotage", "hotage@123", "Hotage Owner", "Owner", "HOTAGE INDIA", "Hotage India");
         seed("abc",    "abc@123",    "ABC Owner",    "Owner", "ABC",          "ABC Traders");
     }
