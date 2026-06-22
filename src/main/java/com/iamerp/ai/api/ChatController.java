@@ -1,7 +1,10 @@
 package com.iamerp.ai.api;
 
 import com.iamerp.ai.gemini.GeminiService;
+import com.iamerp.ai.model.User;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -16,13 +19,28 @@ public class ChatController {
         this.geminiService = geminiService;
     }
 
+    /** Company id always comes from the verified token, never the request body. */
+    private String currentCompanyId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof User user) {
+            return user.getCompanyId();
+        }
+        return null;
+    }
+
     @PostMapping("/chat")
     public ResponseEntity<Map<String, Object>> chat(@RequestBody Map<String, Object> request) {
         Map<String, Object> response = new HashMap<>();
         try {
             String message   = (String) request.get("message");
             String language  = (String) request.getOrDefault("language", "en");
-            String companyId = (String) request.getOrDefault("company_id", "COMP001");
+            String companyId = currentCompanyId();
+
+            if (companyId == null) {
+                response.put("success", false);
+                response.put("error", "Unauthorized");
+                return ResponseEntity.status(401).body(response);
+            }
 
             if (message == null || message.isBlank()) {
                 response.put("success", false);
@@ -43,7 +61,8 @@ public class ChatController {
                 }
             }
 
-String reply = geminiService.chat(message.trim(), history, language, companyId);            response.put("success", true);
+            String reply = geminiService.chat(message.trim(), history, language, companyId);
+            response.put("success", true);
             response.put("reply", reply);
             return ResponseEntity.ok(response);
 
