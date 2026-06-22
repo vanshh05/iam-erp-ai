@@ -13,10 +13,10 @@ import org.springframework.stereotype.Component;
  *    their token. Any company they try to pass in the request is ignored.
  *  - An ADMIN may operate on a company they select per-request. This override is
  *    honored ONLY because the role comes from the verified token, which the
- *    client cannot forge.
+ *    client cannot forgem.
  */
 @Component
-public class CompanyResolver {
+public class Companyresolver {
 
     /** The authenticated user from the verified JWT, or null. */
     public User currentUser() {

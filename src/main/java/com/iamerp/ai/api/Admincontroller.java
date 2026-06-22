@@ -22,13 +22,13 @@ import java.util.*;
  */
 @RestController
 @RequestMapping("/api/admin")
-public class AdminController {
+public class Admincontroller {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final DataSource dataSource;
 
-    public AdminController(UserRepository userRepository,
+    public Admincontroller(UserRepository userRepository,
                            PasswordEncoder passwordEncoder,
                            DataSource dataSource) {
         this.userRepository = userRepository;
@@ -183,7 +183,7 @@ public class AdminController {
         return ResponseEntity.ok(res);
     }
 
-    // ─── helpers ──
+    // ─── helper ──
     private static String str(Map<String, Object> m, String k) {
         Object v = m.get(k);
         return v == null ? "" : v.toString().trim();
