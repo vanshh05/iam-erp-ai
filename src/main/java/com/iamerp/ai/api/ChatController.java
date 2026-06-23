@@ -1,7 +1,7 @@
 package com.iamerp.ai.api;
 
 import com.iamerp.ai.gemini.GeminiService;
-import com.iamerp.ai.security.Companyresolver;
+import com.iamerp.ai.security.CompanyResolver;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,9 +12,9 @@ import java.util.*;
 public class ChatController {
 
     private final GeminiService geminiService;
-    private final Companyresolver companyResolver;
+    private final CompanyResolver companyResolver;
 
-    public ChatController(GeminiService geminiService, Companyresolver companyResolver) {
+    public ChatController(GeminiService geminiService, CompanyResolver companyResolver) {
         this.geminiService = geminiService;
         this.companyResolver = companyResolver;
     }

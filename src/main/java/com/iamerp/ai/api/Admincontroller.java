@@ -22,13 +22,13 @@ import java.util.*;
  */
 @RestController
 @RequestMapping("/api/admin")
-public class Admincontroller {
+public class AdminController {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final DataSource dataSource;
 
-    public Admincontroller(UserRepository userRepository,
+    public AdminController(UserRepository userRepository,
                            PasswordEncoder passwordEncoder,
                            DataSource dataSource) {
         this.userRepository = userRepository;
@@ -143,6 +143,37 @@ public class Admincontroller {
         return ResponseEntity.ok(res);
     }
 
+    // ─── Delete user ──────────────────────────────────────────────────────────
+    @DeleteMapping("/users/{id}")
+    public ResponseEntity<Map<String, Object>> deleteUser(@PathVariable Long id) {
+        Map<String, Object> res = new HashMap<>();
+        Optional<User> opt = userRepository.findById(id);
+        if (opt.isEmpty()) {
+            res.put("success", false);
+            res.put("message", "User not found.");
+            return ResponseEntity.status(404).body(res);
+        }
+
+        // Prevent deleting the last remaining ADMIN account (lockout safety)
+        User target = opt.get();
+        if ("ADMIN".equalsIgnoreCase(target.getRole())) {
+            long adminCount = 0;
+            for (User u : userRepository.findAll()) {
+                if ("ADMIN".equalsIgnoreCase(u.getRole())) adminCount++;
+            }
+            if (adminCount <= 1) {
+                res.put("success", false);
+                res.put("message", "Cannot delete the last admin account.");
+                return ResponseEntity.status(409).body(res);
+            }
+        }
+
+        userRepository.deleteById(id);
+        res.put("success", true);
+        res.put("message", "User deleted.");
+        return ResponseEntity.ok(res);
+    }
+
     // ─── Distinct companies from the actual data ──────────────────────────────
     // Pulls distinct company_id from the data tables (union), so the admin can
     // inspect any company present in the data even before a user exists for it.
@@ -183,7 +214,7 @@ public class Admincontroller {
         return ResponseEntity.ok(res);
     }
 
-    // ─── helper ──
+    // ─── helpers ──
     private static String str(Map<String, Object> m, String k) {
         Object v = m.get(k);
         return v == null ? "" : v.toString().trim();
