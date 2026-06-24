@@ -31,11 +31,6 @@ public class GeminiService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final WebClient webClient = WebClient.builder()
             .codecs(c -> c.defaultCodecs().maxInMemorySize(4 * 1024 * 1024))
-            .clientConnector(new org.springframework.http.client.reactive.ReactorClientHttpConnector(
-                reactor.netty.http.client.HttpClient.create()
-                    .option(io.netty.channel.ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
-                    .responseTimeout(java.time.Duration.ofSeconds(90))
-            ))
             .build();
 
     public GeminiService(ErpFunctions erpFunctions, StockFunctions stockFunctions, DispatchFunctions dispatchFunctions) {
@@ -129,19 +124,19 @@ public class GeminiService {
              + "TABLE: ai_dispatch_summary  — vehicles dispatched/sold to parties (one row per dispatched unit)\n"
              + "  item_name VARCHAR, party_name VARCHAR, invoice_no VARCHAR, invoice_date DATE, quantity DECIMAL\n"
              + "  spec_value_1 through spec_value_20 — generic specification columns (color, chassis, motor, etc.)\n"
-             + "  IMPORTANT: spec_value_N columns have DIFFERENT meanings per company.\n"
-             + "  ALWAYS call get_stock_spec_map first before any dispatch detail query.\n"
+             + "  IMPORTANT: spec_value_N columns use the SAME mapping as ai_stock_spec_map for this company.\n"
+             + "  Call get_stock_spec_map before any dispatch detail query.\n"
              + "\n"
              + "=== DISPATCH QUERY RULES ===\n"
              + "- 'dispatch' = vehicles dispatched/sold and invoiced to parties from ai_dispatch_summary\n"
-             + "- Dispatch spec columns use the SAME mapping as stock — reuse get_stock_spec_map (reads ai_stock_spec_map)\n"
              + "- For SUMMARY queries ('today's dispatch', 'month dispatch', 'total dispatch'):\n"
              + "  use get_dispatch_summary tool with period='today'|'month'|'all'.\n"
              + "  Response includes: total vehicles dispatched, unique parties served, breakdown by item.\n"
              + "  A party with 3 invoices in a month counts as 1 unique party — do NOT double count.\n"
              + "  Do NOT call get_stock_spec_map for these summary queries.\n"
              + "- For FULL DETAIL ('complete dispatch list', 'all dispatches with specifications', 'find chassis X'):\n"
-             + "  FIRST call get_stock_spec_map → then call query_dispatch or search_dispatch_by_spec_value.\n"
+             + "  FIRST call get_stock_spec_map (dispatch uses the SAME spec map as stock for this company)\n"
+             + "  → then call query_dispatch or search_dispatch_by_spec_value.\n"
              + "  Full detail returns: item_name, party_name, invoice_no, invoice_date, quantity,\n"
              + "  and all POPULATED spec columns under their proper human label (e.g. Color, Chassis Number,\n"
              + "  Motor Number, Controller Number, Battery Model). Empty/null/-- spec values are hidden automatically.\n"
@@ -149,6 +144,8 @@ public class GeminiService {
              + "  use query_dispatch with filter party_name LIKE <name>.\n"
              + "- For SPEC SEARCHES ('find motor number X', 'find chassis Y in dispatched vehicles'):\n"
              + "  get_stock_spec_map first → search_dispatch_by_spec_value.\n"
+             + "- IMPORTANT: dispatch and stock share the SAME spec map (ai_stock_spec_map) — never call a\n"
+             + "  separate dispatch spec map. get_stock_spec_map works for both.\n"
              + "- Dispatch data is ONLY in ai_dispatch_summary — never use query_table for dispatch\n"
              + "\n"
              + "COLLECTIONS (money IN): total_collection / cash_collection / bank_collection in ai_daily_summary\n"
@@ -253,6 +250,25 @@ public class GeminiService {
              + "Date columns: summary_date (ai_daily_summary), bill_date (ai_sales/ai_purchase),\n"
              + "              receipt_date (ai_collection_summary), payment_date (ai_payment_summary)\n"
              + "\n"
+             + "=== MONTH & DATE-RANGE QUERIES (IMPORTANT) ===\n"
+             + "When the user asks for a whole month or a date range (e.g. 'May sales', 'April purchases',\n"
+             + "'last month collections', 'this month payments', 'sales between 1 and 15 June'):\n"
+             + "- ALWAYS use a BETWEEN filter on the correct date column with value='yyyy-MM-dd,yyyy-MM-dd'\n"
+             + "  (first day of the period to last day of the period).\n"
+             + "- Compute the exact first and last calendar day of the named month yourself, using the\n"
+             + "  current year (" + today.getYear() + ") unless the user states a different year.\n"
+             + "  Examples (assuming year " + today.getYear() + "):\n"
+             + "    'May sales'        → filter bill_date BETWEEN '" + today.getYear() + "-05-01,' + last day '" + today.getYear() + "-05-31'\n"
+             + "    'April purchases'  → filter bill_date BETWEEN '" + today.getYear() + "-04-01," + today.getYear() + "-04-30'\n"
+             + "    'Feb collections'  → receipt_date BETWEEN '" + today.getYear() + "-02-01," + (today.getYear() % 4 == 0 ? "29" : "28") + "'\n"
+             + "- Use the right date column for the table: bill_date for sales/purchase, receipt_date for\n"
+             + "  collections, payment_date for payments, summary_date for daily summary.\n"
+             + "- A SINGLE specific date ('sales on 5 June') uses an exact = filter on that date, NOT between.\n"
+             + "- NEVER ignore the month — if a month is named, you MUST produce the full BETWEEN range for it.\n"
+             + "- Month lengths: Jan 31, Feb 28 (29 in leap years), Mar 31, Apr 30, May 31, Jun 30, Jul 31,\n"
+             + "  Aug 31, Sep 30, Oct 31, Nov 30, Dec 31.\n"
+             + "- If the month/range result is large, follow the export rule (>20 rows → __export__ JSON).\n"
+             + "\n"
              + "=== AGGREGATION ===\n"
              + "SUM(col), COUNT(col), COUNT(DISTINCT col), AVG(col), MIN(col), MAX(col)\n"
              + "Use COUNT(DISTINCT party_name) for unique party count\n"
@@ -264,26 +280,8 @@ public class GeminiService {
              + "- NEVER summarize or truncate — show every row returned by the tool\n"
              + "- If tool returns 'No data found' — say so truthfully\n"
              + "\n"
-             + "=== UNCLEAR QUERY HANDLING ===\n"
-             + "If you genuinely cannot answer because:\n"
-             + "  - The query is ambiguous or unclear\n"
-             + "  - The requested data does not exist in any available table\n"
-             + "  - The question is outside the scope of this ERP system\n"
-             + "Then respond ONLY with this exact JSON and nothing else:\n"
-             + "{\"__suggestions__\":[\"question 1\",\"question 2\",\"question 3\"]}\n"
-             + "Where each question is a short, specific, relevant alternative that CAN be answered\n"
-             + "using the available data and is close in intent to what the user asked.\n"
-             + "Example: user asks 'mera profit kya hai' → you cannot calculate profit, so suggest:\n"
-             + "{\"__suggestions__\":[\"What is today's total sales?\",\"What is total receivable amount?\",\"Show this month's sales summary\"]}\n"
-             + "NEVER return __suggestions__ when you have successfully answered — only on genuine failure.\n"
-             + "\n"
              + "=== LANGUAGE ===\n"
-             + "[LANG:EN] → respond in English\n"
-             + "[LANG:HI] → respond in Hindi or Hinglish (mix of Hindi and English)\n"
-             + "If the user writes in Hinglish (e.g. 'aaj ka sales batao' or 'kitna stock hai'), respond in\n"
-             + "the same Hinglish style — natural, conversational, mixing Hindi and English naturally.\n"
-             + "Numbers, amounts, dates, and proper nouns (party names, item names) always stay in English.\n"
-             + "NEVER refuse to answer because of the language — always attempt a response.\n"
+             + "[LANG:EN] → respond in English | [LANG:HI] → respond in Hindi\n"
              + "\n"
              + "=== OUTPUT FORMAT ===\n"
              + "- Currency: ₹ with Indian format (₹1,24,500.00)\n"
@@ -407,22 +405,14 @@ public class GeminiService {
               },
               {
                 "name": "get_dispatch_summary",
-                "description": "Get a high-level dispatch summary for a time period. Returns total vehicles dispatched, unique parties served (each counted once regardless of invoice count), and breakdown by item. Use for 'today dispatch', 'month dispatch', 'total dispatch', 'how many vehicles dispatched'. For a specific month like 'May dispatch' or 'April dispatch', use period='month' and set month (1-12) and year (e.g. 2026). Do NOT call get_stock_spec_map before this — no spec labels needed for summaries.",
+                "description": "Get a high-level dispatch summary for a time period. Returns total vehicles dispatched, unique parties served (each counted once regardless of invoice count), and breakdown by item. Use for 'today dispatch', 'month dispatch', 'total dispatch', 'how many vehicles dispatched'. No spec map needed for this tool.",
                 "parameters": {
                   "type": "object",
                   "properties": {
                     "period": {
                       "type": "string",
                       "enum": ["today", "month", "all"],
-                      "description": "'today' = today only | 'month' = a calendar month (use month+year for specific months, omit for current month) | 'all' = all-time total"
-                    },
-                    "month": {
-                      "type": "integer",
-                      "description": "Month number 1-12. Required when the user asks for a specific month like May (5) or April (4). Omit for current month."
-                    },
-                    "year": {
-                      "type": "integer",
-                      "description": "4-digit year e.g. 2026. Provide alongside month for a specific month. Omit to default to the current year."
+                      "description": "'today' = today only | 'month' = current calendar month | 'all' = all-time total"
                     }
                   },
                   "required": ["period"]
@@ -430,7 +420,7 @@ public class GeminiService {
               },
               {
                 "name": "query_dispatch",
-                "description": "Query dispatch records with optional filters, grouping, and ordering. Use AFTER calling get_stock_spec_map (shared with stock). Omit group_by_label for full per-row detail (item_name, party_name, invoice_no, invoice_date, quantity, and every populated+mapped spec column under its proper label). Set group_by_label to aggregate (e.g. group by item_name gives total per item). Spec values that are empty or '--' are hidden automatically.",
+                "description": "Query dispatch records with optional filters, grouping, and ordering. Use AFTER calling get_stock_spec_map (dispatch uses the same spec map as stock for this company). Omit group_by_label for full per-row detail (item_name, party_name, invoice_no, invoice_date, quantity, and every populated+mapped spec column under its proper label). Set group_by_label to aggregate. Spec values that are empty or '--' are hidden automatically.",
                 "parameters": {
                   "type": "object",
                   "properties": {
@@ -455,7 +445,7 @@ public class GeminiService {
               },
               {
                 "name": "search_dispatch_by_spec_value",
-                "description": "Search across ALL mapped dispatch spec columns for a value. Use when user asks to find a specific chassis number, motor number, controller number, battery model, or any other specification in dispatched vehicles. Call get_stock_spec_map first (shared with stock).",
+                "description": "Search across ALL mapped dispatch spec columns for a value — uses ai_stock_spec_map for the column mapping. Use when user asks to find a specific chassis number, motor number, controller number, battery model, or any other spec value in dispatched vehicles. Call get_stock_spec_map first.",
                 "parameters": {
                   "type": "object",
                   "properties": {
@@ -476,9 +466,6 @@ public class GeminiService {
                        List<Map<String, Object>> conversationHistory,
                        String language,
                        String companyId) {
-        // Language is set by the user's toggle (hi/en).
-        // Hinglish (Hindi written in Roman script) comes in as 'hi' from the toggle
-        // and Gemini handles it naturally via the system prompt instruction.
         String langTag = "hi".equalsIgnoreCase(language) ? "[LANG:HI] " : "[LANG:EN] ";
         userMessage = langTag + userMessage;
         try {
@@ -588,7 +575,7 @@ public class GeminiService {
         followUp.set("tools", buildToolDefinitions());
         ObjectNode cfg = mapper.createObjectNode();
         cfg.put("temperature", 0.1);
-        cfg.put("maxOutputTokens", 8192);
+        cfg.put("maxOutputTokens", 65536);
         followUp.set("generationConfig", cfg);
 
         String fr2 = callGemini(followUp);
@@ -608,7 +595,7 @@ public class GeminiService {
         if (includeTools) body.set("tools", buildToolDefinitions());
         ObjectNode cfg = mapper.createObjectNode();
         cfg.put("temperature", 0.1);
-        cfg.put("maxOutputTokens", 8192);
+        cfg.put("maxOutputTokens", 65536);
         body.set("generationConfig", cfg);
         return body;
     }
@@ -694,12 +681,7 @@ public class GeminiService {
             case "search_stock_by_spec_value" ->
                 stockFunctions.searchBySpecValue(companyId, args.path("search_value").asText(""));
             case "get_dispatch_summary" ->
-                dispatchFunctions.getDispatchSummary(
-                    companyId,
-                    args.path("period").asText("all"),
-                    args.path("month").asInt(0),
-                    args.path("year").asInt(0)
-                );
+                dispatchFunctions.getDispatchSummary(companyId, args.path("period").asText("all"));
             case "query_dispatch" -> {
                 List<Map<String, String>> filters = new ArrayList<>();
                 JsonNode filtersNode = args.path("filters");
