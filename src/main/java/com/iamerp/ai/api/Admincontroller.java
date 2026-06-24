@@ -46,6 +46,7 @@ public class AdminController {
         String fullName    = str(body, "full_name");
         String companyId   = str(body, "company_id");
         String companyName = str(body, "company_name");
+        String email       = str(body, "email");
         String role        = body.get("role") == null ? "Owner" : str(body, "role");
 
         if (username.isEmpty() || password.isEmpty() || companyId.isEmpty()) {
@@ -63,6 +64,7 @@ public class AdminController {
         u.setUsername(username);
         u.setPasswordHash(passwordEncoder.encode(password));
         u.setFullName(fullName);
+        u.setEmail(email);
         u.setRole(role);
         u.setCompanyId(companyId);
         u.setCompanyName(companyName);
@@ -100,6 +102,7 @@ public class AdminController {
         User u = opt.get();
 
         if (body.containsKey("full_name"))    u.setFullName(str(body, "full_name"));
+        if (body.containsKey("email"))        u.setEmail(str(body, "email"));
         if (body.containsKey("role"))         u.setRole(str(body, "role"));
         if (body.containsKey("company_id"))   u.setCompanyId(str(body, "company_id"));
         if (body.containsKey("company_name")) u.setCompanyName(str(body, "company_name"));
@@ -225,6 +228,7 @@ public class AdminController {
         m.put("id", u.getId());
         m.put("username", u.getUsername());
         m.put("full_name", u.getFullName());
+        m.put("email", u.getEmail());
         m.put("role", u.getRole());
         m.put("company_id", u.getCompanyId());
         m.put("company_name", u.getCompanyName());
