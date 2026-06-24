@@ -405,14 +405,22 @@ public class GeminiService {
               },
               {
                 "name": "get_dispatch_summary",
-                "description": "Get a high-level dispatch summary for a time period. Returns total vehicles dispatched, unique parties served (each counted once regardless of invoice count), and breakdown by item. Use for 'today dispatch', 'month dispatch', 'total dispatch', 'how many vehicles dispatched'. No spec map needed for this tool.",
+                "description": "Get a high-level dispatch summary for a time period. Returns total vehicles dispatched, unique parties served (each counted once regardless of invoice count), and breakdown by item. Use for 'today dispatch', 'month dispatch', 'total dispatch', 'how many vehicles dispatched'. For a specific month like 'May dispatch' or 'April dispatch', use period='month' and set month (1-12) and year (e.g. current year). No spec map needed for this tool.",
                 "parameters": {
                   "type": "object",
                   "properties": {
                     "period": {
                       "type": "string",
                       "enum": ["today", "month", "all"],
-                      "description": "'today' = today only | 'month' = current calendar month | 'all' = all-time total"
+                      "description": "'today' = today only | 'month' = a calendar month (use month+year for specific months, omit for current month) | 'all' = all-time total"
+                    },
+                    "month": {
+                      "type": "integer",
+                      "description": "Month number 1-12. Required when the user asks for a specific month like May (5) or April (4). Omit for current month."
+                    },
+                    "year": {
+                      "type": "integer",
+                      "description": "4-digit year. Provide alongside month for a specific month. Omit to default to the current year."
                     }
                   },
                   "required": ["period"]
@@ -681,7 +689,12 @@ public class GeminiService {
             case "search_stock_by_spec_value" ->
                 stockFunctions.searchBySpecValue(companyId, args.path("search_value").asText(""));
             case "get_dispatch_summary" ->
-                dispatchFunctions.getDispatchSummary(companyId, args.path("period").asText("all"));
+                dispatchFunctions.getDispatchSummary(
+                    companyId,
+                    args.path("period").asText("all"),
+                    args.path("month").asInt(0),
+                    args.path("year").asInt(0)
+                );
             case "query_dispatch" -> {
                 List<Map<String, String>> filters = new ArrayList<>();
                 JsonNode filtersNode = args.path("filters");
