@@ -166,12 +166,22 @@ public class ExportController {
             params.add(company);
 
             if (safeFilterCol != null && filter_val != null && !filter_val.isBlank()) {
+                java.util.Set<String> dateCols = java.util.Set.of(
+                    "bill_date", "voucher_date", "summary_date",
+                    "receipt_date", "payment_date", "last_bill_date");
+                boolean isDateCol = dateCols.contains(safeFilterCol);
+                String colExpr = isDateCol ? "DATE(" + safeFilterCol + ")" : safeFilterCol;
+
                 if (filter_val.matches("\\d{4}-\\d{2}-\\d{2},\\d{4}-\\d{2}-\\d{2}")) {
                     // Date range: "yyyy-MM-dd,yyyy-MM-dd"
                     String[] parts = filter_val.split(",", 2);
-                    sql.append(" AND ").append(safeFilterCol).append(" BETWEEN ? AND ?");
+                    sql.append(" AND ").append(colExpr).append(" BETWEEN ? AND ?");
                     params.add(parts[0].trim());
                     params.add(parts[1].trim());
+                } else if (isDateCol) {
+                    // Single date — match on the date part only (ignore time component)
+                    sql.append(" AND ").append(colExpr).append(" = ?");
+                    params.add(filter_val.trim());
                 } else if (EXACT_MATCH_COLUMNS.contains(safeFilterCol)) {
                     // Exact match for categorical columns
                     sql.append(" AND ").append(safeFilterCol).append(" = ?");

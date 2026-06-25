@@ -59,6 +59,13 @@ public class ErpFunctions {
 
     private static final Set<String> ALLOWED_SORT_DIRECTIONS = Set.of("ASC", "DESC");
 
+    // Columns that hold dates (possibly with a time component). Comparisons against these
+    // are wrapped in DATE() so a plain yyyy-MM-dd value matches regardless of stored time.
+    private static final Set<String> DATE_COLUMNS = Set.of(
+        "bill_date", "voucher_date", "summary_date",
+        "receipt_date", "payment_date", "last_bill_date"
+    );
+
     public ErpFunctions(DataSource dataSource) {
         this.dataSource = dataSource;
     }
@@ -171,9 +178,15 @@ public class ErpFunctions {
                     return "ERROR: Filter column '" + col + "' not found in '" + tableName + "'";
                 }
 
+                // Date columns may be stored as DATETIME/TIMESTAMP. When comparing against a
+                // plain yyyy-MM-dd value, wrap the column in DATE() so the time component is
+                // ignored — otherwise bill_date = '2026-06-25' misses rows stored at 14:30:00.
+                boolean isDateCol = DATE_COLUMNS.contains(col);
+                String colExpr = isDateCol ? "DATE(" + col + ")" : col;
+
                 switch (op) {
                     case "=", "!=", ">", "<", ">=", "<=" -> {
-                        where.append(" AND ").append(col).append(" ").append(op).append(" ?");
+                        where.append(" AND ").append(colExpr).append(" ").append(op).append(" ?");
                         params.add(val);
                     }
                     case "LIKE", "like" -> {
@@ -184,7 +197,7 @@ public class ErpFunctions {
                         // val should be "start,end"
                         String[] parts = val.split(",", 2);
                         if (parts.length == 2) {
-                            where.append(" AND ").append(col).append(" BETWEEN ? AND ?");
+                            where.append(" AND ").append(colExpr).append(" BETWEEN ? AND ?");
                             params.add(parts[0].trim());
                             params.add(parts[1].trim());
                         }
@@ -193,7 +206,7 @@ public class ErpFunctions {
                         // val should be comma-separated values
                         String[] inVals = val.split(",");
                         String placeholders = String.join(",", Collections.nCopies(inVals.length, "?"));
-                        where.append(" AND ").append(col).append(" IN (").append(placeholders).append(")");
+                        where.append(" AND ").append(colExpr).append(" IN (").append(placeholders).append(")");
                         for (String iv : inVals) params.add(iv.trim());
                     }
                     default -> { /* ignore unknown operators for safety */ }
