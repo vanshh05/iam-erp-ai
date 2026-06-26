@@ -37,6 +37,8 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints — login & password reset
+                // Public endpoints — login, password reset, and health check (for UptimeRobot)
+                .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/login").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/forgot-password").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/reset-password").permitAll()
