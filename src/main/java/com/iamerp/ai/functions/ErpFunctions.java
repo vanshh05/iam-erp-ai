@@ -250,7 +250,18 @@ public class ErpFunctions {
             }
 
             if (rows.isEmpty()) {
-                return "No data found for the requested query.";
+                String noun = switch (tableName) {
+                    case "ai_sales"               -> "sales records";
+                    case "ai_purchase"            -> "purchase records";
+                    case "ai_collection_summary"  -> "collection records";
+                    case "ai_payment_summary"     -> "payment records";
+                    case "ai_party_status"        -> "parties";
+                    case "ai_bank_balance_summary"-> "bank balance records";
+                    case "ai_daily_summary"       -> "daily summary records";
+                    default                       -> "records";
+                };
+                return "No " + noun + " found matching the requested criteria. The module is active, "
+                     + "but there is no data for what was asked (e.g. that date, party, or filter).";
             }
 
             ObjectNode result = mapper.createObjectNode();

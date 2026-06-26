@@ -44,6 +44,21 @@ public class StockFunctions {
         this.dataSource = dataSource;
     }
 
+    /** True if this company has at least one row in ai_stock_summary (i.e. the stock module is active). */
+    private boolean hasStockData(String companyId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT 1 FROM ai_stock_summary WHERE company_id = ? LIMIT 1")) {
+            ps.setString(1, companyId);
+            return ps.executeQuery().next();
+        } catch (SQLException e) {
+            return false;
+        }
+    }
+
+    private static final String STOCK_MODULE_DISABLED =
+        "This company doesn't have an active stock module.";
+
     // ─── 1. GET SPEC MAP — returns label→column mapping for a company ─────────
     public String getSpecMap(String companyId) {
         try (Connection conn = dataSource.getConnection();
@@ -65,7 +80,7 @@ public class StockFunctions {
                 found = true;
             }
             if (!found) {
-                return "{\"error\":\"No spec map found for company. Please set up ai_stock_spec_map first.\"}";
+                return STOCK_MODULE_DISABLED;
             }
             result.set("label_to_column", labelToCol);
             result.set("column_to_label", colToLabel);
@@ -92,7 +107,12 @@ public class StockFunctions {
             String sortDir,
             int limit
     ) {
-        // Step 1: fetch spec map
+        // Module check: stock is active only if the company has rows in ai_stock_summary.
+        if (!hasStockData(companyId)) {
+            return STOCK_MODULE_DISABLED;
+        }
+
+        // Step 1: fetch spec map (for human labels; shared with dispatch)
         Map<String, String> labelToCol = new LinkedHashMap<>(); // "color" → "spec_value_1"
         Map<String, String> colToLabel = new LinkedHashMap<>(); // "spec_value_1" → "Color"
         try (Connection conn = dataSource.getConnection();
@@ -109,10 +129,6 @@ public class StockFunctions {
             }
         } catch (SQLException e) {
             return "Database error loading spec map: " + e.getMessage();
-        }
-
-        if (labelToCol.isEmpty()) {
-            return "ERROR: No spec map configured for this company. Cannot determine which columns represent which specifications.";
         }
 
         // Step 2: resolve filter columns
@@ -277,7 +293,11 @@ public class StockFunctions {
     // ─── 4. SEARCH SPEC VALUE — find items by any spec value ─────────────────
     // e.g. "find all RED items" — searches across ALL spec columns for this company
     public String searchBySpecValue(String companyId, String searchValue) {
-        // Get spec map first
+        // Module check first
+        if (!hasStockData(companyId)) {
+            return STOCK_MODULE_DISABLED;
+        }
+        // Get spec map (for labels)
         Map<String, String> colToLabel = new LinkedHashMap<>();
         List<String> mappedCols = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
@@ -295,7 +315,7 @@ public class StockFunctions {
             return "DB error: " + e.getMessage();
         }
 
-        if (mappedCols.isEmpty()) return "No spec map configured for this company.";
+        if (mappedCols.isEmpty()) return STOCK_MODULE_DISABLED;
 
         // Build WHERE searching only MAPPED spec columns (not all 20)
         List<Object> params = new ArrayList<>();
