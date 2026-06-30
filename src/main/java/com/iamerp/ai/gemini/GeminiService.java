@@ -120,9 +120,6 @@ public class GeminiService {
              + "  row with item_name, quantity, and every mapped specification column under its proper label\n"
              + "  from the spec map (e.g. Color, Chassis Number) — show ALL of these columns, do not aggregate.\n"
              + "- Stock data is ONLY in ai_stock_summary — never use query_table for stock\n"
-             + "- If a stock tool returns \"This company doesn't have an active stock module\", relay that\n"
-             + "  message to the user as-is. Do NOT retry, do NOT invent data. It means this company has\n"
-             + "  no stock data set up.\n"
              + "\n"
              + "TABLE: ai_dispatch_summary  — vehicles dispatched/sold to parties (one row per dispatched unit)\n"
              + "  item_name VARCHAR, party_name VARCHAR, invoice_no VARCHAR, invoice_date DATE, quantity DECIMAL\n"
@@ -150,30 +147,15 @@ public class GeminiService {
              + "- IMPORTANT: dispatch and stock share the SAME spec map (ai_stock_spec_map) — never call a\n"
              + "  separate dispatch spec map. get_stock_spec_map works for both.\n"
              + "- Dispatch data is ONLY in ai_dispatch_summary — never use query_table for dispatch\n"
-             + "- If a dispatch tool returns \"This company doesn't have an active dispatch module\", relay that\n"
-             + "  message to the user as-is. Do NOT retry, do NOT invent data. It means this company has\n"
-             + "  no dispatch data set up.\n"
              + "\n"
-             + "COLLECTIONS (money IN): compute from ai_collection_summary directly\n"
-             + "  → SUM(amount) for totals, COUNT(*) for entry count, COUNT(DISTINCT party_name) for parties\n"
-             + "  → Individual transactions (receipt_date, party_name, amount, receipt_mode, cheque_txn_no)\n"
-             + "PAYMENTS (money OUT): compute from ai_payment_summary directly\n"
-             + "  → SUM(amount) for totals, COUNT(*) for entry count, COUNT(DISTINCT party_name) for parties\n"
-             + "  → Individual transactions (payment_date, party_name, amount, payment_mode, cheque_txn_no)\n"
-             + "SALES: ALWAYS compute from ai_sales (the source of truth) — both totals AND individual bills.\n"
-             + "  → total sales = SUM(invoice_amount), bill count = COUNT(*), parties = COUNT(DISTINCT party_name)\n"
-             + "PURCHASE: ALWAYS compute from ai_purchase (the source of truth) — both totals AND individual bills.\n"
-             + "  → total purchase = SUM(invoice_amount), bill count = COUNT(*), parties = COUNT(DISTINCT party_name)\n"
+             + "COLLECTIONS (money IN): total_collection / cash_collection / bank_collection in ai_daily_summary\n"
+             + "  Individual transactions → ai_collection_summary (receipt_date, party_name, amount, receipt_mode)\n"
+             + "PAYMENTS (money OUT): total_payment / cash_payment / bank_payment in ai_daily_summary\n"
+             + "  Individual transactions → ai_payment_summary (payment_date, party_name, amount, payment_mode)\n"
+             + "SALES: daily totals → ai_daily_summary | individual bills → ai_sales\n"
+             + "PURCHASE: daily totals → ai_daily_summary | individual bills → ai_purchase\n"
              + "BANK: → ai_bank_balance_summary (bank_name, balance_type, balance)\n"
-             + "\n"
-             + "=== CRITICAL: DO NOT USE ai_daily_summary FOR SALES/PURCHASE/COLLECTION/PAYMENT TOTALS ===\n"
-             + "ai_daily_summary is a pre-aggregated cache that may be incomplete or stale. NEVER use it to\n"
-             + "answer 'total sales', 'total purchase', 'total collection', 'total payment' for today, a month,\n"
-             + "or any range. ALWAYS compute these from the source tables (ai_sales, ai_purchase,\n"
-             + "ai_collection_summary, ai_payment_summary) using SUM/COUNT so the summary and the detailed\n"
-             + "listing are computed from the SAME table and ALWAYS match. A summary can never report fewer\n"
-             + "bills than unique parties — if it does, the wrong table was used.\n"
-             + "NEVER confuse total_payment with total_collection.\n"
+             + "NEVER confuse total_payment with total_collection\n"
              + "\n"
              + "=== MANDATORY COLUMN ORDER FOR UI DISPLAY ===\n"
              + "ALWAYS use these exact select_columns for each table:\n"
@@ -186,15 +168,14 @@ public class GeminiService {
              + "ai_daily_summary: summary_date,total_sales,cash_sales,credit_sales,total_bills_count,total_collection,cash_collection,bank_collection,total_payment,cash_payment,bank_payment,total_purchase,cash_purchase,credit_purchase,total_receivable,total_payable,total_discount_given\n"
              + "\n"
              + "=== TABLE SELECTION GUIDE ===\n"
-             + "Sales totals AND sales bills (any period)       → ai_sales (SUM/COUNT for totals)\n"
-             + "Purchase totals AND purchase bills (any period) → ai_purchase (SUM/COUNT for totals)\n"
-             + "Collection totals AND receipts                  → ai_collection_summary (SUM/COUNT for totals)\n"
-             + "Payment totals AND payments                     → ai_payment_summary (SUM/COUNT for totals)\n"
+             + "Daily totals (sales/purchase/collection/payment) → ai_daily_summary\n"
+             + "Individual sales bill / by party / by bill_no   → ai_sales\n"
+             + "Individual purchase bill                        → ai_purchase\n"
+             + "Who paid us / receipt details                   → ai_collection_summary\n"
+             + "Who we paid / payment details                   → ai_payment_summary\n"
              + "Bank/account balances                           → ai_bank_balance_summary\n"
              + "Party contact/address/balance/GSTIN             → ai_party_status\n"
              + "Stock / inventory / warehouse / items           → ai_stock_summary (use stock tools, NOT query_table)\n"
-             + "ai_daily_summary → AVOID for totals (may be stale). Only use if user explicitly asks for the\n"
-             + "  'daily summary' row of a specific past date.\n"
              + "\n"
              + "=== PARTY STATUS QUERIES ===\n"
              + "- ALWAYS set select_columns to the full party_status order above\n"
@@ -212,23 +193,12 @@ public class GeminiService {
              + "RECEIVABLE  = outstanding_balance of Customers (Debtors)\n"
              + "            → query ai_party_status, filter party_type = 'Customer'\n"
              + "            → show: party_name, sub_party_type, outstanding_balance, balance_type\n"
-             + "            → 'TOTAL receivable' (the single aggregate figure as on today) = total_receivable\n"
-             + "              column from ai_daily_summary, filtered to TODAY ONLY (summary_date = CURDATE()).\n"
-             + "              DO NOT sum ai_party_status for the total, and DO NOT use SELECT * on ai_daily_summary.\n"
+             + "            → 'total receivable' = SUM(outstanding_balance) WHERE party_type='Customer' AND balance_type='Debit'\n"
              + "\n"
              + "PAYABLE     = outstanding_balance of Suppliers (Creditors)\n"
              + "            → query ai_party_status, filter party_type = 'Supplier'\n"
              + "            → show: party_name, sub_party_type, outstanding_balance, balance_type\n"
-             + "            → 'TOTAL payable' (the single aggregate figure as on today) = total_payable column\n"
-             + "              from ai_daily_summary, filtered to TODAY ONLY (summary_date = CURDATE()).\n"
-             + "              DO NOT sum ai_party_status for the total, and DO NOT use SELECT * on ai_daily_summary.\n"
-             + "\n"
-             + "AS-ON-DATE RULE for receivable/payable totals:\n"
-             + "  - total receivable / total payable are ONLY available as on TODAY (from ai_daily_summary's\n"
-             + "    today row). If the user asks for total receivable/payable for a PAST date or month, reply\n"
-             + "    that these figures are only available as on the current date, not for back dates.\n"
-             + "  - This applies ONLY to the aggregate total. Debtor/creditor LISTS and per-party balances\n"
-             + "    still come from ai_party_status exactly as before (current snapshot).\n"
+             + "            → 'total payable' = SUM(outstanding_balance) WHERE party_type='Supplier' AND balance_type='Credit'\n"
              + "\n"
              + "LEDGER BALANCE = OUTSTANDING BALANCE = CLOSING BALANCE = AMOUNT (of a party) — these all mean\n"
              + "the SAME thing: the outstanding_balance column for that party. They are NOT a request for the\n"
@@ -246,8 +216,8 @@ public class GeminiService {
              + "EXAMPLES:\n"
              + "  'show all debtors'           → party_type = 'Customer'\n"
              + "  'show all creditors'         → party_type = 'Supplier'\n"
-             + "  'total receivable'           → total_receivable from ai_daily_summary WHERE summary_date=CURDATE()\n"
-             + "  'total payable'              → total_payable from ai_daily_summary WHERE summary_date=CURDATE()\n"
+             + "  'total receivable'           → SUM outstanding_balance WHERE party_type='Customer' AND balance_type='Debit'\n"
+             + "  'total payable'              → SUM outstanding_balance WHERE party_type='Supplier' AND balance_type='Credit'\n"
              + "  'ledger balance of Raj'      → party_name LIKE 'Raj', select_columns='party_name,outstanding_balance,balance_type'\n"
              + "  'outstanding amount of Raj'  → party_name LIKE 'Raj', select_columns='party_name,outstanding_balance,balance_type'\n"
              + "  'closing balance of Raj'     → party_name LIKE 'Raj', select_columns='party_name,outstanding_balance,balance_type'\n"
@@ -271,17 +241,6 @@ public class GeminiService {
              + "  All customers:             {\"__export__\":true,\"table\":\"ai_party_status\",\"filter_col\":\"party_type\",\"filter_val\":\"Customer\",\"order_by\":\"party_name\",\"label\":\"All Debtors (Customers)\"}\n"
              + "  All bank balances:         {\"__export__\":true,\"table\":\"ai_bank_balance_summary\",\"filter_col\":\"\",\"filter_val\":\"\",\"order_by\":\"balance\",\"label\":\"All Bank Balances\"}\n"
              + "  All collections April:     {\"__export__\":true,\"table\":\"ai_collection_summary\",\"filter_col\":\"receipt_date\",\"filter_val\":\"2026-04-01,2026-04-30\",\"order_by\":\"receipt_date\",\"label\":\"Collections April 2026\"}\n"
-             + "\n"
-             + "=== TODAY & DATE FILTERING (FOLLOW EXACTLY) ===\n"
-             + "Today's date is " + todayIso + ".\n"
-             + "- For 'today' queries: filter the date column with operator '=' and value '" + todayIso + "'.\n"
-             + "  Example: today's sales → query ai_sales with filter {column:'bill_date', operator:'=', value:'" + todayIso + "'}\n"
-             + "- The backend automatically ignores any time component on date columns, so a plain\n"
-             + "  yyyy-MM-dd value WILL match rows correctly. Always use yyyy-MM-dd, never add a time.\n"
-             + "- Use the SAME filter for BOTH the summary aggregation AND the detail listing in a report,\n"
-             + "  so they never disagree. If the summary finds N bills, the detail MUST find the same N rows.\n"
-             + "- bill_date for ai_sales/ai_purchase, receipt_date for ai_collection_summary,\n"
-             + "  payment_date for ai_payment_summary, summary_date for ai_daily_summary.\n"
              + "\n"
              + "=== DATE REFERENCE ===\n"
              + "Today        = " + todayStr + " (" + todayIso + ")\n"
@@ -446,22 +405,22 @@ public class GeminiService {
               },
               {
                 "name": "get_dispatch_summary",
-                "description": "Get a high-level dispatch summary for a time period. Returns total vehicles dispatched, unique parties served (each counted once regardless of invoice count), and breakdown by item. Use for 'today dispatch', 'month dispatch', 'total dispatch', 'how many vehicles dispatched'. For a specific month like 'May dispatch' or 'April dispatch', use period='month' and set month (1-12) and year (e.g. current year). No spec map needed for this tool.",
+                "description": "Get a high-level dispatch summary for a time period. Returns total vehicles dispatched, unique parties served (each counted once regardless of invoice count), and breakdown by item. Use for 'today dispatch', 'month dispatch', 'total dispatch', 'how many vehicles dispatched'. For a specific month like 'May dispatch' or 'April dispatch', use period='month' and set month (1-12) and year. No spec map needed for this tool.",
                 "parameters": {
                   "type": "object",
                   "properties": {
                     "period": {
                       "type": "string",
                       "enum": ["today", "month", "all"],
-                      "description": "'today' = today only | 'month' = a calendar month (use month+year for specific months, omit for current month) | 'all' = all-time total"
+                      "description": "'today' = today only | 'month' = a calendar month (use month+year for a specific month, omit them for current month) | 'all' = all-time total"
                     },
                     "month": {
                       "type": "integer",
-                      "description": "Month number 1-12. Required when the user asks for a specific month like May (5) or April (4). Omit for current month."
+                      "description": "Month number 1-12. Required when the user asks for a specific month like May (5). Omit for current month."
                     },
                     "year": {
                       "type": "integer",
-                      "description": "4-digit year. Provide alongside month for a specific month. Omit to default to the current year."
+                      "description": "4-digit year. Provide with month for a specific month. Omit to default to current year."
                     }
                   },
                   "required": ["period"]
@@ -575,7 +534,28 @@ public class GeminiService {
 
         // No tool calls → return text directly
         if (toolCalls.isEmpty()) {
-            return textParts.toString().trim();
+            String text = textParts.toString().trim();
+
+            // Gemini sometimes emits a MALFORMED_FUNCTION_CALL (or an empty completion) — a
+            // transient failure where it tried to call a tool but produced invalid output, leaving
+            // no usable text. Retry the call a couple of times before giving up.
+            if (text.isEmpty() && depth < 3 &&
+                ("MALFORMED_FUNCTION_CALL".equals(finishReason) || finishReason.isEmpty() || "OTHER".equals(finishReason))) {
+                log.warn("[Gemini] Empty/malformed result (finishReason={}), retrying (attempt {})", finishReason, depth + 1);
+                try {
+                    ObjectNode retryBody = buildRequestBody(originalMessage, history, true);
+                    String retryStr = callGemini(retryBody);
+                    JsonNode retry = mapper.readTree(retryStr);
+                    return processResponse(retry, originalMessage, history, depth + 1, companyId);
+                } catch (Exception e) {
+                    log.error("[Gemini] Retry failed: {}", e.getMessage());
+                }
+            }
+
+            if (text.isEmpty()) {
+                return "The assistant couldn't process that request just now. Please try again.";
+            }
+            return text;
         }
 
         // Build full conversation: history + user message + model tool call + tool results

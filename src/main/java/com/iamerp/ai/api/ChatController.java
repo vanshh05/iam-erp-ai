@@ -63,6 +63,15 @@ public class ChatController {
             }
 
             String reply = geminiService.chat(message.trim(), history, language, companyId);
+
+            // Retry once if Gemini returned nothing usable (transient empty completion)
+            if (reply == null || reply.trim().isEmpty()) {
+                reply = geminiService.chat(message.trim(), history, language, companyId);
+            }
+            if (reply == null || reply.trim().isEmpty()) {
+                reply = "The assistant couldn't generate a response for that. Please rephrase or try again.";
+            }
+
             response.put("success", true);
             response.put("reply", reply);
             return ResponseEntity.ok(response);
