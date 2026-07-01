@@ -36,9 +36,8 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(auth -> auth
-                // Public endpoints — login & password reset
-                // Public endpoints — login, password reset, and health check (for UptimeRobot)
-                // Health is permitted for ANY method (UptimeRobot uses HEAD by default, not GET)
+                // Public endpoints — login, password reset, and health check (for UptimeRobot).
+                // Health is permitted for ANY method (UptimeRobot uses HEAD by default, not GET).
                 .requestMatchers("/api/health").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/login").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/forgot-password").permitAll()
@@ -51,6 +50,10 @@ public class SecurityConfig {
             )
             // No server-side sessions — JWT is stateless
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // Return a clean 401 for any unauthenticated/kicked-out request (instead of 403),
+            // so the frontend can reliably detect it and redirect to the login screen.
+            .exceptionHandling(ex -> ex.authenticationEntryPoint(
+                (request, response, authException) -> response.sendError(401, "Unauthorized")))
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
