@@ -2,6 +2,7 @@ package com.iamerp.ai.security;
 
 import com.iamerp.ai.model.User;
 import com.iamerp.ai.model.UserRepository;
+import com.iamerp.ai.model.UserSessionRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,10 +32,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final UserSessionRepository sessionRepository;
 
-    public JwtAuthFilter(JwtService jwtService, UserRepository userRepository) {
+    public JwtAuthFilter(JwtService jwtService, UserRepository userRepository,
+                         UserSessionRepository sessionRepository) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
+        this.sessionRepository = sessionRepository;
     }
 
     @Override
@@ -58,14 +62,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 Optional<User> userOpt = userRepository.findByUsername(username);
 
-                // Single-device check: the session token in the JWT must match the one stored
-                // for this user. A newer login on another device overwrote it, so an old token
-                // no longer matches → this device is treated as logged out.
+                // Session check: the session token in the JWT must still exist in the sessions
+                // table for this user. If it was evicted (single-device overwrite for owners, or
+                // FIFO eviction past 5 devices for admins), it's gone → treated as logged out.
                 boolean sessionMatches = false;
                 if (userOpt.isPresent()) {
                     String tokenSession = jwtService.extractSessionToken(token);
-                    String dbSession = userOpt.get().getSessionToken();
-                    sessionMatches = tokenSession != null && tokenSession.equals(dbSession);
+                    sessionMatches = tokenSession != null
+                        && sessionRepository.existsByUsernameAndSessionToken(username, tokenSession);
                 }
 
                 if (userOpt.isPresent()

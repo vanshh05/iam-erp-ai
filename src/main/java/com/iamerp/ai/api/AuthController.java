@@ -2,6 +2,8 @@ package com.iamerp.ai.api;
 
 import com.iamerp.ai.model.User;
 import com.iamerp.ai.model.UserRepository;
+import com.iamerp.ai.model.UserSession;
+import com.iamerp.ai.model.UserSessionRepository;
 import com.iamerp.ai.security.JwtService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,16 +23,22 @@ import java.util.Optional;
 public class AuthController {
 
     private final UserRepository userRepository;
+    private final UserSessionRepository sessionRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
 
     public AuthController(UserRepository userRepository,
+                          UserSessionRepository sessionRepository,
                           PasswordEncoder passwordEncoder,
                           JwtService jwtService) {
         this.userRepository = userRepository;
+        this.sessionRepository = sessionRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
     }
+
+    private static final int ADMIN_MAX_SESSIONS = 5;
+    private static final int OWNER_MAX_SESSIONS = 1;
 
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> login(@RequestBody Map<String, Object> request) {
@@ -58,12 +66,23 @@ public class AuthController {
 
         User user = userOpt.get();
 
-        // Single-device login: generate a fresh session token, save it to the user's row,
-        // and embed it in the JWT. Any previously-issued token carries an old session token
-        // that no longer matches the DB, so all other devices are logged out on next request.
+        // Multi-device sessions with FIFO eviction.
+        //   Owner → max 1 device (strict single-device, unchanged behaviour)
+        //   Admin → max 5 devices; a 6th login evicts the earliest-logged-in device
         String sessionToken = java.util.UUID.randomUUID().toString();
-        user.setSessionToken(sessionToken);
-        userRepository.save(user);
+        UserSession newSession = new UserSession();
+        newSession.setUsername(user.getUsername());
+        newSession.setSessionToken(sessionToken);
+        newSession.setCreatedAt(java.time.LocalDateTime.now());
+        sessionRepository.save(newSession);
+
+        int maxSessions = "ADMIN".equalsIgnoreCase(user.getRole()) ? ADMIN_MAX_SESSIONS : OWNER_MAX_SESSIONS;
+        var sessions = sessionRepository.findByUsernameOrderByCreatedAtAsc(user.getUsername());
+        // Evict oldest until we're within the limit
+        int toRemove = sessions.size() - maxSessions;
+        for (int i = 0; i < toRemove; i++) {
+            sessionRepository.delete(sessions.get(i)); // sessions.get(0) is the earliest login
+        }
 
         String token = jwtService.generateToken(user.getUsername(), user.getCompanyId(), user.getRole(), sessionToken);
 
