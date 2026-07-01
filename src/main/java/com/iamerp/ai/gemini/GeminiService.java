@@ -495,6 +495,15 @@ public class GeminiService {
                                    List<Map<String, Object>> history,
                                    int depth,
                                    String companyId) throws Exception {
+        return processResponse(response, originalMessage, history, depth, companyId, null);
+    }
+
+    private String processResponse(JsonNode response,
+                                   String originalMessage,
+                                   List<Map<String, Object>> history,
+                                   int depth,
+                                   String companyId,
+                                   ArrayNode priorContents) throws Exception {
         if (depth > MAX_TOOL_DEPTH) {
             log.warn("[Gemini] Tool depth cap ({}) reached — forcing a final text answer.", MAX_TOOL_DEPTH);
             // First, use any text already in this response
@@ -580,7 +589,12 @@ public class GeminiService {
         }
 
         // Build full conversation: history + user message + model tool call + tool results
-        ArrayNode contents = buildContentsWithHistory(originalMessage, history);
+        // Build/continue the conversation. On the first tool round priorContents is null so we
+        // build fresh; on deeper rounds we REUSE the accumulated contents so Gemini can see every
+        // tool call and result it already made — this prevents it re-fetching the same data in a loop.
+        ArrayNode contents = (priorContents != null)
+            ? priorContents
+            : buildContentsWithHistory(originalMessage, history);
 
         // Model turn (tool call)
         ObjectNode modelTurn = mapper.createObjectNode();
@@ -629,7 +643,7 @@ public class GeminiService {
         followUp.set("generationConfig", cfg);
 
         String fr2 = callGemini(followUp);
-        return processResponse(mapper.readTree(fr2), originalMessage, history, depth + 1, companyId);
+        return processResponse(mapper.readTree(fr2), originalMessage, history, depth + 1, companyId, contents);
     }
 
     // ─── Build request body ───────────────────────────────────────────────────
