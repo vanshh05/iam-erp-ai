@@ -21,6 +21,9 @@ public class User {
 
     private String email;
 
+    @jakarta.persistence.Column(name = "session_token")
+    private String sessionToken;
+
     private String role;
 
     @Column(name = "company_id", nullable = false)
@@ -44,6 +47,9 @@ public class User {
 
     public String getFullName() { return fullName; }
     public void setFullName(String fullName) { this.fullName = fullName; }
+
+    public String getSessionToken() { return sessionToken; }
+    public void setSessionToken(String sessionToken) { this.sessionToken = sessionToken; }
 
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }

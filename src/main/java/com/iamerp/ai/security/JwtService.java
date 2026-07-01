@@ -32,11 +32,12 @@ public class JwtService {
         return Keys.hmacShaKeyFor(secretKey.getBytes(StandardCharsets.UTF_8));
     }
 
-    // ── Generate a token for a user ──
-    public String generateToken(String username, String companyId, String role) {
+    // ── Generate a token for a user (with a session token for single-device login) ──
+    public String generateToken(String username, String companyId, String role, String sessionToken) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("company_id", companyId);
         claims.put("role", role);
+        claims.put("session_token", sessionToken);
         return Jwts.builder()
                 .claims(claims)
                 .subject(username)
@@ -44,6 +45,10 @@ public class JwtService {
                 .expiration(new Date(System.currentTimeMillis() + expirationMs))
                 .signWith(getSigningKey())
                 .compact();
+    }
+
+    public String extractSessionToken(String token) {
+        return extractAllClaims(token).get("session_token", String.class);
     }
 
     // ── Extract values ──

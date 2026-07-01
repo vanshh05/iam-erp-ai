@@ -57,7 +57,15 @@ public class AuthController {
         }
 
         User user = userOpt.get();
-        String token = jwtService.generateToken(user.getUsername(), user.getCompanyId(), user.getRole());
+
+        // Single-device login: generate a fresh session token, save it to the user's row,
+        // and embed it in the JWT. Any previously-issued token carries an old session token
+        // that no longer matches the DB, so all other devices are logged out on next request.
+        String sessionToken = java.util.UUID.randomUUID().toString();
+        user.setSessionToken(sessionToken);
+        userRepository.save(user);
+
+        String token = jwtService.generateToken(user.getUsername(), user.getCompanyId(), user.getRole(), sessionToken);
 
         response.put("success",      true);
         response.put("token",        token);

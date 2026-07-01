@@ -58,8 +58,19 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 Optional<User> userOpt = userRepository.findByUsername(username);
 
+                // Single-device check: the session token in the JWT must match the one stored
+                // for this user. A newer login on another device overwrote it, so an old token
+                // no longer matches → this device is treated as logged out.
+                boolean sessionMatches = false;
+                if (userOpt.isPresent()) {
+                    String tokenSession = jwtService.extractSessionToken(token);
+                    String dbSession = userOpt.get().getSessionToken();
+                    sessionMatches = tokenSession != null && tokenSession.equals(dbSession);
+                }
+
                 if (userOpt.isPresent()
                         && Boolean.TRUE.equals(userOpt.get().getIsActive())
+                        && sessionMatches
                         && jwtService.isTokenValid(token, username)) {
 
                     User user = userOpt.get();
