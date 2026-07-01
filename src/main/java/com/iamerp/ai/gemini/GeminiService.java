@@ -488,7 +488,7 @@ public class GeminiService {
     }
 
     // ─── Process response (supports chained tool calls, capped at MAX_TOOL_DEPTH) ─
-    private static final int MAX_TOOL_DEPTH = 4;
+    private static final int MAX_TOOL_DEPTH = 6;
 
     private String processResponse(JsonNode response,
                                    String originalMessage,
@@ -496,7 +496,8 @@ public class GeminiService {
                                    int depth,
                                    String companyId) throws Exception {
         if (depth > MAX_TOOL_DEPTH) {
-            // Safety cap reached — return whatever text we have rather than looping forever
+            log.warn("[Gemini] Tool depth cap ({}) reached — forcing a final text answer.", MAX_TOOL_DEPTH);
+            // First, use any text already in this response
             JsonNode cands = response.path("candidates");
             if (!cands.isEmpty()) {
                 StringBuilder sb = new StringBuilder();
@@ -504,9 +505,29 @@ public class GeminiService {
                     if (part.has("text")) sb.append(part.get("text").asText());
                 }
                 String t = sb.toString().trim();
-                return t.isEmpty() ? "No data found for the requested query." : t;
+                if (!t.isEmpty()) return t;
             }
-            return "No data found for the requested query.";
+            // No text yet — make ONE final call with tools disabled so Gemini must answer in words
+            // using the data it already fetched in this conversation.
+            try {
+                ObjectNode finalBody = buildRequestBody(
+                    originalMessage + "\n\n(Please now give the final answer in text using the data already retrieved. Do not call any more tools.)",
+                    history, false);
+                String finalStr = callGemini(finalBody);
+                JsonNode finalResp = mapper.readTree(finalStr);
+                JsonNode fc = finalResp.path("candidates");
+                if (!fc.isEmpty()) {
+                    StringBuilder sb2 = new StringBuilder();
+                    for (JsonNode part : fc.get(0).path("content").path("parts")) {
+                        if (part.has("text")) sb2.append(part.get("text").asText());
+                    }
+                    String t2 = sb2.toString().trim();
+                    if (!t2.isEmpty()) return t2;
+                }
+            } catch (Exception e) {
+                log.error("[Gemini] Final-answer call failed: {}", e.getMessage());
+            }
+            return "The assistant gathered the data but couldn't finish composing the answer. Please try again.";
         }
 
         JsonNode candidates = response.path("candidates");
