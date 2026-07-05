@@ -55,7 +55,7 @@ public class GeminiService {
              + "Your ONLY job is to fetch and present ERP data EXACTLY as returned by the tools.\n\n"
              + "=== DATABASE SCHEMA (7 TABLES) ===\n"
              + "\n"
-             + "TABLE: ai_daily_summary  — pre-aggregated daily totals\n"
+             + "TABLE: ai_daily_summary  — pre-aggregated daily totals (RESERVED: only for total_receivable/total_payable as on TODAY; historical rows unreliable)\n"
              + "  summary_date DATE\n"
              + "  total_sales, cash_sales, credit_sales DECIMAL\n"
              + "  total_bills_count INT\n"
@@ -148,13 +148,17 @@ public class GeminiService {
              + "  separate dispatch spec map. get_stock_spec_map works for both.\n"
              + "- Dispatch data is ONLY in ai_dispatch_summary — never use query_table for dispatch\n"
              + "\n"
-             + "COLLECTIONS (money IN): total_collection / cash_collection / bank_collection in ai_daily_summary\n"
-             + "  Individual transactions → ai_collection_summary (receipt_date, party_name, amount, receipt_mode)\n"
-             + "PAYMENTS (money OUT): total_payment / cash_payment / bank_payment in ai_daily_summary\n"
-             + "  Individual transactions → ai_payment_summary (payment_date, party_name, amount, payment_mode)\n"
-             + "SALES: daily totals → ai_daily_summary | individual bills → ai_sales\n"
-             + "PURCHASE: daily totals → ai_daily_summary | individual bills → ai_purchase\n"
+             + "COLLECTIONS (money IN): ALL collection queries → ai_collection_summary\n"
+             + "  (receipt_date, party_name, amount, receipt_mode). Totals = SUM(amount); date-wise = GROUP BY receipt_date.\n"
+             + "PAYMENTS (money OUT): ALL payment queries → ai_payment_summary\n"
+             + "  (payment_date, party_name, amount, payment_mode). Totals = SUM(amount); date-wise = GROUP BY payment_date.\n"
+             + "SALES: ALL sales queries → ai_sales. Totals = SUM(invoice_amount); bills count = COUNT(bill_no);\n"
+             + "  date-wise/month breakdown = GROUP BY bill_date; details = the row columns. NEVER use ai_daily_summary for sales.\n"
+             + "PURCHASE: ALL purchase queries → ai_purchase, exactly like sales. NEVER use ai_daily_summary for purchase.\n"
              + "BANK: → ai_bank_balance_summary (bank_name, balance_type, balance)\n"
+             + "ai_daily_summary is reserved for ONE thing only: total_receivable / total_payable as on TODAY\n"
+             + "  (summary_date = CURDATE()). Do not use it for sales, purchase, collection, or payment — its\n"
+             + "  historical rows are unreliable and will give wrong/missing results.\n"
              + "NEVER confuse total_payment with total_collection\n"
              + "\n"
              + "=== MANDATORY COLUMN ORDER FOR UI DISPLAY ===\n"
@@ -168,11 +172,11 @@ public class GeminiService {
              + "ai_daily_summary: summary_date,total_sales,cash_sales,credit_sales,total_bills_count,total_collection,cash_collection,bank_collection,total_payment,cash_payment,bank_payment,total_purchase,cash_purchase,credit_purchase,total_receivable,total_payable,total_discount_given\n"
              + "\n"
              + "=== TABLE SELECTION GUIDE ===\n"
-             + "Daily totals (sales/purchase/collection/payment) → ai_daily_summary\n"
-             + "Individual sales bill / by party / by bill_no   → ai_sales\n"
-             + "Individual purchase bill                        → ai_purchase\n"
-             + "Who paid us / receipt details                   → ai_collection_summary\n"
-             + "Who we paid / payment details                   → ai_payment_summary\n"
+             + "Sales — totals, date-wise, month, details      → ai_sales (SUM/GROUP BY bill_date as needed)\n"
+             + "Purchase — totals, date-wise, month, details   → ai_purchase\n"
+             + "Collection — totals, date-wise, details        → ai_collection_summary\n"
+             + "Payment — totals, date-wise, details           → ai_payment_summary\n"
+             + "Total receivable/payable AS ON TODAY (only)    → ai_daily_summary (summary_date = CURDATE())\n"
              + "Bank/account balances                           → ai_bank_balance_summary\n"
              + "Party contact/address/balance/GSTIN             → ai_party_status\n"
              + "Stock / inventory / warehouse / items           → ai_stock_summary (use stock tools, NOT query_table)\n"
@@ -345,7 +349,7 @@ public class GeminiService {
               },
               {
                 "name": "get_today_summary",
-                "description": "Get today's complete summary: sales, bills, cash/credit split, collection, payment, purchase.",
+                "description": "Returns today's row from ai_daily_summary. Use ONLY when the user asks for total receivable or total payable as on today. Do NOT use for sales, purchase, collection, or payment figures — compute those from ai_sales / ai_purchase / ai_collection_summary / ai_payment_summary instead.",
                 "parameters": { "type": "object", "properties": {} }
               },
               {
