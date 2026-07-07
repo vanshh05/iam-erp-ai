@@ -55,6 +55,14 @@ public class ExportController {
             "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
             "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
             "igst_amount", "invoice_amount", "taxable_amount", "payment_mode"
+        ),
+        "ai_dispatch_summary", Set.of(
+            "company_id", "item_name", "party_name", "invoice_no", "invoice_date", "quantity",
+            "spec_value_1", "spec_value_2", "spec_value_3", "spec_value_4", "spec_value_5", "spec_value_6", "spec_value_7", "spec_value_8", "spec_value_9", "spec_value_10", "spec_value_11", "spec_value_12", "spec_value_13", "spec_value_14", "spec_value_15", "spec_value_16", "spec_value_17", "spec_value_18", "spec_value_19", "spec_value_20"
+        ),
+        "ai_stock_summary", Set.of(
+            "company_id", "item_name", "quantity",
+            "spec_value_1", "spec_value_2", "spec_value_3", "spec_value_4", "spec_value_5", "spec_value_6", "spec_value_7", "spec_value_8", "spec_value_9", "spec_value_10", "spec_value_11", "spec_value_12", "spec_value_13", "spec_value_14", "spec_value_15", "spec_value_16", "spec_value_17", "spec_value_18", "spec_value_19", "spec_value_20"
         )
     );
 
@@ -168,7 +176,7 @@ public class ExportController {
             if (safeFilterCol != null && filter_val != null && !filter_val.isBlank()) {
                 java.util.Set<String> dateCols = java.util.Set.of(
                     "bill_date", "voucher_date", "summary_date",
-                    "receipt_date", "payment_date", "last_bill_date");
+                    "receipt_date", "payment_date", "last_bill_date", "invoice_date");
                 boolean isDateCol = dateCols.contains(safeFilterCol);
                 String colExpr = isDateCol ? "DATE(" + safeFilterCol + ")" : safeFilterCol;
 
