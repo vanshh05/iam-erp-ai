@@ -117,6 +117,9 @@ public class GeminiService {
              + "- For queries like 'how many RED vehicles': get map → find Color column → filter that column = 'RED'\n"
              + "- For queries like 'find chassis number X': get map → find Chassis Number column → filter that column\n"
              + "- For broad searches ('find RED in stock'): use search_stock_by_spec_value tool\n"
+             + "- SPEC VALUES CONTAIN EXTRA TEXT — when filtering a spec label (Color, Chassis, etc.) in\n"
+             + "  query_stock, use operator 'LIKE' with the keyword only, never '='. A color is stored as\n"
+             + "  e.g. 'RED (6X4X18+GRILL) DOUBLE KAMANI', so {label:'Color', operator:'LIKE', value:'RED'}.\n"
              + "- For item-specific queries: use query_stock tool with item_name filter\n"
              + "- For summaries ('how many of each color'): use query_stock with group_by_label='Color'\n"
              + "- For a TOTAL STOCK SUMMARY ('stock summary', 'total quantity of each item', 'stock in a nutshell'):\n"
@@ -155,6 +158,13 @@ public class GeminiService {
              + "  with >= and <= for a range. NEVER answer a dated dispatch question without this tool call.\n"
              + "- For SPEC SEARCHES ('find motor number X', 'find chassis Y in dispatched vehicles'):\n"
              + "  get_stock_spec_map first → search_dispatch_by_spec_value.\n"
+             + "- SPEC VALUES CONTAIN EXTRA TEXT — match them with LIKE, never exact '='. In this data a\n"
+             + "  color is stored as e.g. 'RED (6X4X18+GRILL) DOUBLE KAMANI' or 'SKY BLUE SS DLX', not just\n"
+             + "  'Red'. So 'red vehicles dispatched on 30 June' → get_stock_spec_map, then query_dispatch\n"
+             + "  with filters [{label:'Color', operator:'LIKE', value:'RED'}, {label:'invoice_date',\n"
+             + "  operator:'=', value:'2026-06-30'}]. The same applies to every spec label (chassis, motor,\n"
+             + "  battery, controller): filter with LIKE + the keyword. Combine a spec LIKE filter with an\n"
+             + "  exact invoice_date filter for date+spec questions.\n"
              + "- IMPORTANT: dispatch and stock share the SAME spec map (ai_stock_spec_map) — never call a\n"
              + "  separate dispatch spec map. get_stock_spec_map works for both.\n"
              + "- Dispatch data is ONLY in ai_dispatch_summary — never use query_table for dispatch\n"
@@ -390,7 +400,7 @@ public class GeminiService {
                   "properties": {
                     "filters": {
                       "type": "array",
-                      "description": "List of filter conditions using human label names (e.g. 'Color') or fixed columns (item_name, quantity). Each has label, operator, value.",
+                      "description": "List of filter conditions using human label names (e.g. 'Color') or fixed columns (item_name, quantity). Each has label, operator, value. CRITICAL: for SPEC-value labels (Color, Chassis Number, etc.) ALWAYS use operator 'LIKE' with just the keyword, because spec values contain extra text — e.g. {label:'Color', operator:'LIKE', value:'RED'} matches 'RED (6X4X18+GRILL) DOUBLE KAMANI'. Using '=' returns nothing. Use '=' only for exact columns (item_name, quantity).",
                       "items": {
                         "type": "object",
                         "properties": {
@@ -450,7 +460,7 @@ public class GeminiService {
                   "properties": {
                     "filters": {
                       "type": "array",
-                      "description": "Optional filters. Each item: {label: column or spec label, operator: '='|'!='|'LIKE'|'>'|'<'|'>='|'<='|'IN', value: string}. Date filter example: {label:'invoice_date', operator:'>=', value:'2026-04-01'}",
+                      "description": "Optional filters. Each item: {label: column or spec label, operator: '='|'!='|'LIKE'|'>'|'<'|'>='|'<='|'IN', value: string}. Date filter example: {label:'invoice_date', operator:'>=', value:'2026-04-01'}. CRITICAL: for SPEC-value labels (Color, Chassis Number, Motor Number, Battery Model, etc.) ALWAYS use operator 'LIKE' with just the keyword, because spec values often contain extra descriptive text. Example: to find red vehicles use {label:'Color', operator:'LIKE', value:'RED'} — this matches 'RED (6X4X18+GRILL) DOUBLE KAMANI'. Using '=' would wrongly return nothing. Use '=' only for exact structured columns like invoice_date, quantity, party_name.",
                       "items": {
                         "type": "object",
                         "properties": {
