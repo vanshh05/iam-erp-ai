@@ -340,9 +340,22 @@ public class ErpFunctions {
             }
 
             if (rows.isEmpty()) {
+                // Nothing matched the LIKE — the name is probably misspelled. Find the
+                // closest real party names so the user can pick instead of hitting a dead end.
+                List<String> close = closestLedgerParties(conn, companyId, partyName.trim());
+                if (!close.isEmpty()) {
+                    ObjectNode noMatch = mapper.createObjectNode();
+                    noMatch.put("table", "ai_party_ledger");
+                    noMatch.put("no_match", true);
+                    noMatch.put("searched", partyName.trim());
+                    ArrayNode arr = mapper.createArrayNode();
+                    close.forEach(arr::add);
+                    noMatch.set("closest_matches", arr);
+                    return noMatch.toString();
+                }
                 return "No ledger entries found for a party matching '" + partyName.trim()
-                     + "'. The ledger module is active, but no party with that name has ledger data. "
-                     + "Check the party name spelling.";
+                     + "', and no similarly-named party exists in the ledger. "
+                     + "Ask the user to check the party name.";
             }
 
             // The LIKE match may catch several parties (e.g. two branches with similar
@@ -358,6 +371,67 @@ public class ErpFunctions {
         } catch (SQLException e) {
             return "Database error: " + e.getMessage();
         }
+    }
+
+    // Fuzzy party-name suggestions: compares the searched name against every distinct
+    // party in the ledger and returns the closest few. Token-based: each word of the
+    // search is scored against each word of the candidate (substring hit = perfect,
+    // otherwise Levenshtein similarity), so 'sidhi vinayak' finds 'Shree Siddhi
+    // Vinayak Educational & Welfare Trust A/c (02303)'.
+    private List<String> closestLedgerParties(Connection conn, String companyId, String searched)
+            throws SQLException {
+        List<String> names = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT DISTINCT party_name FROM ai_party_ledger WHERE company_id = ? LIMIT 3000")) {
+            ps.setString(1, companyId);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) names.add(rs.getString(1));
+        }
+
+        String[] qTokens = searched.toLowerCase().split("[^a-z0-9]+");
+        List<Map.Entry<String, Double>> scored = new ArrayList<>();
+        for (String name : names) {
+            String[] nTokens = name.toLowerCase().split("[^a-z0-9]+");
+            double total = 0; int counted = 0;
+            for (String qt : qTokens) {
+                if (qt.isBlank() || qt.length() < 2) continue;
+                double best = 0;
+                for (String nt : nTokens) {
+                    if (nt.isBlank()) continue;
+                    double sim;
+                    if (nt.contains(qt) || qt.contains(nt)) {
+                        sim = 1.0;
+                    } else {
+                        int d = levenshtein(qt, nt);
+                        sim = 1.0 - ((double) d / Math.max(qt.length(), nt.length()));
+                    }
+                    if (sim > best) best = sim;
+                }
+                total += best; counted++;
+            }
+            if (counted == 0) continue;
+            double score = total / counted;
+            if (score >= 0.65) scored.add(Map.entry(name, score));
+        }
+        scored.sort((x, y) -> Double.compare(y.getValue(), x.getValue()));
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < Math.min(5, scored.size()); i++) out.add(scored.get(i).getKey());
+        return out;
+    }
+
+    private static int levenshtein(String a, String b) {
+        int[] prev = new int[b.length() + 1];
+        int[] curr = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) prev[j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            curr[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                curr[j] = Math.min(Math.min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+            }
+            int[] t = prev; prev = curr; curr = t;
+        }
+        return prev[b.length()];
     }
 
     // ─── 2. GET TABLE SCHEMA — lets Gemini know exact column names ───────────
