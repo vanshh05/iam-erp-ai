@@ -205,6 +205,7 @@ public class GeminiService {
              + "Total receivable/payable AS ON TODAY (only)    → ai_daily_summary (summary_date = CURDATE())\n"
              + "Bank/account balances                           → ai_bank_balance_summary\n"
              + "Party contact/address/balance/GSTIN             → ai_party_status\n"
+             + "Party GENERAL LEDGER / statement / khata        → get_party_ledger tool ONLY (needs a party name; never query_table)\n"
              + "Stock / inventory / warehouse / items           → ai_stock_summary (use stock tools, NOT query_table)\n"
              + "\n"
              + "=== PARTY STATUS QUERIES ===\n"
@@ -213,6 +214,26 @@ public class GeminiService {
              + "- Filter party_type = 'Customer' or 'Supplier' for type\n"
              + "- Filter sub_party_type = 'Dealer' / 'Buyer' etc for sub-type\n"
              + "- If no result, retry with shorter name keyword\n"
+             + "\n"
+             + "=== PARTY GENERAL LEDGER (get_party_ledger) ===\n"
+             + "- Use ONLY when the user explicitly asks for a party's ledger / general ledger /\n"
+             + "  account statement / khata — AND names the party. Examples: 'show Goel Plywood's\n"
+             + "  ledger', 'general ledger of SM Automobiles', 'AAKAR ka khata dikhao'.\n"
+             + "- If the user asks for a ledger WITHOUT naming a party, DO NOT call any tool —\n"
+             + "  ask which party's ledger they want.\n"
+             + "- NEVER use this for outstanding balance / receivable / payable / due questions.\n"
+             + "  Those ALWAYS come from ai_party_status. The ledger is only for the full\n"
+             + "  statement view of one party.\n"
+             + "- PRESENTATION (strict): show a table with columns Particulars, Voucher Date,\n"
+             + "  Voucher Type, Voucher No, Invoice No, Debit, Credit, Balance — in EXACTLY the\n"
+             + "  row order the tool returns. Do NOT re-sort. The first row is the Opening\n"
+             + "  Balance; the final row contains the total debit, total credit and closing\n"
+             + "  outstanding balance — label that final row 'Total' in the Particulars column\n"
+             + "  (the raw data may show '0.0' there). Empty/null cells stay blank.\n"
+             + "- The tool result has NO seq_no field and none must be shown or mentioned.\n"
+             + "- If the result's distinct_party_count is more than 1, the name matched several\n"
+             + "  parties: list the matched_parties and ask the user which one they want —\n"
+             + "  do NOT merge ledgers of different parties into one statement.\n"
              + "\n"
              + "=== BUSINESS TERMINOLOGY MAPPINGS — CRITICAL ===\n"
              + "Always apply these mappings before querying:\n"
@@ -387,6 +408,17 @@ public class GeminiService {
                   "properties": {
                     "min_overdue_days": { "type": "integer", "description": "Minimum overdue days. Default 1." }
                   }
+                }
+              },
+              {
+                "name": "get_party_ledger",
+                "description": "Get the complete GENERAL LEDGER (account statement) of ONE specific party: opening balance, every voucher entry (date, type, number, invoice, debit, credit, running balance), and the closing totals row. ONLY use when the user explicitly asks for a ledger / general ledger / account statement / khata of a NAMED party. A party name is REQUIRED — if the user has not named a party, ask which party they mean instead of calling this tool. Never use this for outstanding-balance, receivable, or payable questions (those come from ai_party_status).",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "party_name": { "type": "string", "description": "Name (or distinctive part of the name) of the party whose ledger is wanted. REQUIRED." }
+                  },
+                  "required": ["party_name"]
                 }
               },
               {
@@ -751,6 +783,7 @@ public class GeminiService {
             case "get_table_schema"    -> erpFunctions.getTableSchema(args.path("table_name").asText("all"));
             case "get_today_summary"   -> erpFunctions.getTodaySummary(companyId);
             case "get_overdue_parties" -> erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
+            case "get_party_ledger" -> erpFunctions.getPartyLedger(args.path("party_name").asText(""), companyId);
             case "get_stock_spec_map"  -> stockFunctions.getSpecMap(companyId);
             case "query_stock" -> {
                 List<Map<String, String>> filters = new ArrayList<>();

@@ -288,6 +288,78 @@ public class ErpFunctions {
         }
     }
 
+
+    // ─── PARTY GENERAL LEDGER ─────────────────────────────────────────────────
+    // Returns the full general ledger for ONE named party, in statement order:
+    // seq_no drives the ordering (1 = Opening Balance ... last = totals row) but
+    // is intentionally NOT included in the output — the report must not show it.
+    // A party name is REQUIRED: this ledger is never listed for all parties.
+    public String getPartyLedger(String partyName, String companyId) {
+        if (partyName == null || partyName.trim().isEmpty()) {
+            return "ERROR: A specific party name is required to fetch a general ledger. "
+                 + "Ask the user which party's ledger they want.";
+        }
+
+        String sql = "SELECT party_name, particulars, voucher_date, voucher_type, voucher_no, "
+                   + "invoice_no, debit, credit, balance "
+                   + "FROM ai_party_ledger "
+                   + "WHERE company_id = ? AND LOWER(party_name) LIKE LOWER(?) "
+                   + "ORDER BY party_name, seq_no ASC LIMIT 2000";
+
+        log.info("[ErpFunctions] SQL: {} | Params: [{}, %{}%]", sql, companyId, partyName.trim());
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, companyId);
+            ps.setString(2, "%" + partyName.trim() + "%");
+
+            ResultSet rs = ps.executeQuery();
+            ResultSetMetaData meta = rs.getMetaData();
+            int colCount = meta.getColumnCount();
+
+            ArrayNode rows = mapper.createArrayNode();
+            java.util.Set<String> partiesSeen = new java.util.LinkedHashSet<>();
+            while (rs.next()) {
+                ObjectNode row = mapper.createObjectNode();
+                for (int i = 1; i <= colCount; i++) {
+                    String colName = meta.getColumnLabel(i);
+                    String colType = meta.getColumnTypeName(i);
+                    if (rs.getObject(i) == null) {
+                        row.putNull(colName);
+                    } else if (colType.contains("DECIMAL") || colType.contains("DOUBLE") || colType.contains("FLOAT")) {
+                        row.put(colName, fmt(rs.getDouble(i)));
+                    } else if (colType.contains("INT")) {
+                        row.put(colName, rs.getLong(i));
+                    } else {
+                        row.put(colName, rs.getString(i));
+                    }
+                }
+                partiesSeen.add(rs.getString("party_name"));
+                rows.add(row);
+            }
+
+            if (rows.isEmpty()) {
+                return "No ledger entries found for a party matching '" + partyName.trim()
+                     + "'. The ledger module is active, but no party with that name has ledger data. "
+                     + "Check the party name spelling.";
+            }
+
+            // The LIKE match may catch several parties (e.g. two branches with similar
+            // names). Report them so the model can ask the user to disambiguate.
+            ObjectNode result = mapper.createObjectNode();
+            result.put("table", "ai_party_ledger");
+            result.put("row_count", rows.size());
+            result.put("matched_parties", String.join(" | ", partiesSeen));
+            result.put("distinct_party_count", partiesSeen.size());
+            result.set("data", rows);
+            return result.toString();
+
+        } catch (SQLException e) {
+            return "Database error: " + e.getMessage();
+        }
+    }
+
     // ─── 2. GET TABLE SCHEMA — lets Gemini know exact column names ───────────
     public String getTableSchema(String tableName) {
         if (tableName == null || tableName.isBlank() || "all".equalsIgnoreCase(tableName)) {
