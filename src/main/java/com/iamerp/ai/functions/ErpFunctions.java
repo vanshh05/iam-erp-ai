@@ -397,9 +397,16 @@ public class ErpFunctions {
                 if (qt.isBlank() || qt.length() < 2) continue;
                 double best = 0;
                 for (String nt : nTokens) {
-                    if (nt.isBlank()) continue;
+                    // Skip tiny candidate tokens ('s', 'o', 'a', 'c' from "S/o"/"A/c"):
+                    // single letters are substrings of almost every word and previously
+                    // gave every "X S/o Y A/c" party a near-perfect score.
+                    if (nt.isBlank() || nt.length() < 2) continue;
                     double sim;
-                    if (nt.contains(qt) || qt.contains(nt)) {
+                    if (nt.equals(qt)) {
+                        sim = 1.0;
+                    } else if ((nt.contains(qt) || qt.contains(nt))
+                               && Math.min(nt.length(), qt.length()) >= 3) {
+                        // containment only counts when the shorter token is a real word
                         sim = 1.0;
                     } else {
                         int d = levenshtein(qt, nt);
