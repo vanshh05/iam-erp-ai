@@ -201,11 +201,13 @@ public class ErpFunctions {
                     case "BETWEEN", "between" -> {
                         // val should be "start,end"
                         String[] parts = val.split(",", 2);
-                        if (parts.length == 2) {
-                            where.append(" AND ").append(colExpr).append(" BETWEEN ? AND ?");
-                            params.add(parts[0].trim());
-                            params.add(parts[1].trim());
+                        if (parts.length != 2) {
+                            return "ERROR: BETWEEN filter on '" + col + "' needs two comma-separated values"
+                                 + " (got '" + val + "').";
                         }
+                        where.append(" AND ").append(colExpr).append(" BETWEEN ? AND ?");
+                        params.add(parts[0].trim());
+                        params.add(parts[1].trim());
                     }
                     case "IN", "in" -> {
                         // val should be comma-separated values
@@ -214,7 +216,13 @@ public class ErpFunctions {
                         where.append(" AND ").append(colExpr).append(" IN (").append(placeholders).append(")");
                         for (String iv : inVals) params.add(iv.trim());
                     }
-                    default -> { /* ignore unknown operators for safety */ }
+                    // An unrecognised operator must NEVER be silently ignored: dropping the filter
+                    // would run the query unfiltered and report, say, full-year totals as if they
+                    // were this month's. Fail loudly instead.
+                    default -> {
+                        return "ERROR: Unsupported filter operator '" + op + "' on column '" + col
+                             + "'. Allowed: =, !=, >, <, >=, <=, LIKE, BETWEEN, IN.";
+                    }
                 }
             }
         }
