@@ -17,6 +17,11 @@ import java.util.*;
 @Service
 public class GeminiService {
 
+    /** Returned when Gemini yields no usable text after retries. Callers should treat this
+     *  as a failure, not as an answer. */
+    public static final String EMPTY_RESULT =
+        "The assistant couldn't process that request just now. Please try again.";
+
     private static final Logger log = LoggerFactory.getLogger(GeminiService.class);
 
     @Value("${gemini.api.key}")
@@ -592,12 +597,12 @@ public class GeminiService {
         if (toolCalls.isEmpty()) {
             String text = textParts.toString().trim();
 
-            // Gemini sometimes emits a MALFORMED_FUNCTION_CALL (or an empty completion) — a
-            // transient failure where it tried to call a tool but produced invalid output, leaving
-            // no usable text. Retry the call a couple of times before giving up.
-            if (text.isEmpty() && depth < 3 &&
-                ("MALFORMED_FUNCTION_CALL".equals(finishReason) || finishReason.isEmpty() || "OTHER".equals(finishReason))) {
-                log.warn("[Gemini] Empty/malformed result (finishReason={}), retrying (attempt {})", finishReason, depth + 1);
+            // Gemini sometimes returns an empty completion — a MALFORMED_FUNCTION_CALL, or a bare
+            // STOP with no text after a tool error. This is transient. Retry on ANY empty result
+            // rather than only on specific finishReasons: an empty answer is never a valid answer,
+            // whatever the reason given.
+            if (text.isEmpty() && depth < 3) {
+                log.warn("[Gemini] Empty result (finishReason={}), retrying (attempt {})", finishReason, depth + 1);
                 try {
                     ObjectNode retryBody = buildRequestBody(originalMessage, history, true);
                     String retryStr = callGemini(retryBody);
@@ -609,7 +614,7 @@ public class GeminiService {
             }
 
             if (text.isEmpty()) {
-                return "The assistant couldn't process that request just now. Please try again.";
+                return EMPTY_RESULT;
             }
             return text;
         }

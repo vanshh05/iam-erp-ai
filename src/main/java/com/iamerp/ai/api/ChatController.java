@@ -64,12 +64,19 @@ public class ChatController {
 
             String reply = geminiService.chat(message.trim(), history, language, companyId);
 
-            // Retry once if Gemini returned nothing usable (transient empty completion)
-            if (reply == null || reply.trim().isEmpty()) {
+            // Treat an empty reply OR Gemini's own "couldn't process" fallback as unusable —
+            // both mean no real answer was produced. Retry once before surfacing anything.
+            if (isUnusable(reply)) {
                 reply = geminiService.chat(message.trim(), history, language, companyId);
             }
-            if (reply == null || reply.trim().isEmpty()) {
-                reply = "The assistant couldn't generate a response for that. Please rephrase or try again.";
+
+            if (isUnusable(reply)) {
+                // Still nothing. Tell the client this failed so it can retry rather than
+                // rendering the apology as if it were an answer.
+                response.put("success", false);
+                response.put("error", "The assistant could not generate a response for that request.");
+                response.put("reply", "The assistant couldn't generate a response for that. Please rephrase or try again.");
+                return ResponseEntity.ok(response);
             }
 
             response.put("success", true);
@@ -90,5 +97,12 @@ public class ChatController {
         response.put("service", "Ayaam ERP AI Assistant");
         response.put("timestamp", new Date().toString());
         return ResponseEntity.ok(response);
+    }
+
+    /** A reply is unusable if it is blank or is Gemini's own "couldn't process" fallback. */
+    private static boolean isUnusable(String reply) {
+        return reply == null
+            || reply.trim().isEmpty()
+            || GeminiService.EMPTY_RESULT.equals(reply.trim());
     }
 }

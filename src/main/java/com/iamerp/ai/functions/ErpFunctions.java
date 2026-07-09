@@ -115,11 +115,16 @@ public class ErpFunctions {
             List<String> cols = new ArrayList<>();
             for (String col : selectCols.split(",")) {
                 String c = col.trim().toLowerCase();
-                // Allow aggregate functions like SUM(col), COUNT(col), AVG(col)
-                if (c.matches("(sum|count|avg|min|max)\\(distinct [a-z_]+\\)") || c.matches("(sum|count|avg|min|max)\\([a-z_]+\\)")) {
+                // COUNT(*) is the standard row-count form and is explicitly instructed by the
+                // dashboard prompts. It has no inner column to validate.
+                if (c.matches("count\\(\\s*\\*\\s*\\)")) {
+                    cols.add("count(*)");
+                }
+                // Allow aggregate functions like SUM(col), COUNT(col), COUNT(DISTINCT col)
+                else if (c.matches("(sum|count|avg|min|max)\\((distinct\\s+)?[a-z_]+\\)")) {
                     // Extract inner column name — handles COUNT(DISTINCT col) and COUNT(col)
-                    String inner = c.replaceAll(".+\\((?:distinct )?([a-z_]+)\\)", "$1");
-                    if (!isValidColumn(tableName, inner) && !inner.equals("*")) {
+                    String inner = c.replaceAll("^(?:sum|count|avg|min|max)\\((?:distinct\\s+)?([a-z_]+)\\)$", "$1");
+                    if (!isValidColumn(tableName, inner)) {
                         return "ERROR: Column '" + inner + "' not allowed in table '" + tableName + "'";
                     }
                     cols.add(c);
@@ -143,8 +148,8 @@ public class ErpFunctions {
             // Allow aggregate functions in order by too
             String ob = orderBy.trim().toLowerCase();
             boolean validOrderBy = isValidColumn(tableName, ob)
-                || ob.matches("(sum|count|avg|min|max)\\([a-z_*]+\\)")
-                || ob.matches("(sum|count|avg|min|max)\\(distinct [a-z_]+\\)");
+                || ob.matches("count\\(\\s*\\*\\s*\\)")
+                || ob.matches("(sum|count|avg|min|max)\\((distinct\\s+)?[a-z_]+\\)");
             if (!validOrderBy) {
                 return "ERROR: Cannot sort by '" + orderBy + "' — column not found in '" + tableName + "'";
             }
