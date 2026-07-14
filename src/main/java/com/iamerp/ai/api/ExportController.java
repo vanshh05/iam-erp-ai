@@ -3,6 +3,7 @@ package com.iamerp.ai.api;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.iamerp.ai.config.CompanyContext;
 import com.iamerp.ai.security.CompanyResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -164,6 +165,7 @@ public class ExportController {
 
         int safeLimit = Math.min(Math.max(limit, 1), 10000);
 
+        CompanyContext.set(company); // route to backup schema if this company is mid-refresh
         try (Connection conn = dataSource.getConnection()) {
 
             // Build query
@@ -248,6 +250,8 @@ public class ExportController {
             response.put("success", false);
             response.put("error", "Database error: " + e.getMessage());
             return ResponseEntity.internalServerError().body(response);
+        } finally {
+            CompanyContext.clear();
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.iamerp.ai.api;
 
+import com.iamerp.ai.config.CompanyContext;
 import com.iamerp.ai.gemini.GeminiService;
 import com.iamerp.ai.security.CompanyResolver;
 import org.springframework.http.ResponseEntity;
@@ -62,12 +63,20 @@ public class ChatController {
                 }
             }
 
-            String reply = geminiService.chat(message.trim(), history, language, companyId);
-
-            // Treat an empty reply OR Gemini's own "couldn't process" fallback as unusable —
-            // both mean no real answer was produced. Retry once before surfacing anything.
-            if (isUnusable(reply)) {
+            // Route DB reads to the backup schema while this company's data refresh
+            // job is running (see SchemaRoutingDataSource). Cleared in finally.
+            String reply;
+            try {
+                CompanyContext.set(companyId);
                 reply = geminiService.chat(message.trim(), history, language, companyId);
+
+                // Treat an empty reply OR Gemini's own "couldn't process" fallback as unusable —
+                // both mean no real answer was produced. Retry once before surfacing anything.
+                if (isUnusable(reply)) {
+                    reply = geminiService.chat(message.trim(), history, language, companyId);
+                }
+            } finally {
+                CompanyContext.clear();
             }
 
             if (isUnusable(reply)) {
