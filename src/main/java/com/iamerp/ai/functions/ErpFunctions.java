@@ -115,10 +115,20 @@ public class ErpFunctions {
             List<String> cols = new ArrayList<>();
             for (String col : selectCols.split(",")) {
                 String c = col.trim().toLowerCase();
+                // The model often writes aggregates with an alias — "sum(invoice_amount) as
+                // total_sales". Split a trailing alias off, validate the expression, and keep
+                // the alias in the SQL (it is harmless and helps the model read results).
+                String alias = "";
+                java.util.regex.Matcher am = java.util.regex.Pattern
+                        .compile("^(.*?)\\s+as\\s+([a-z_][a-z0-9_]*)$").matcher(c);
+                if (am.matches()) {
+                    c = am.group(1).trim();
+                    alias = " as " + am.group(2);
+                }
                 // COUNT(*) is the standard row-count form and is explicitly instructed by the
                 // dashboard prompts. It has no inner column to validate.
                 if (c.matches("count\\(\\s*\\*\\s*\\)")) {
-                    cols.add("count(*)");
+                    cols.add("count(*)" + alias);
                 }
                 // Allow aggregate functions like SUM(col), COUNT(col), COUNT(DISTINCT col)
                 else if (c.matches("(sum|count|avg|min|max)\\((distinct\\s+)?[a-z_]+\\)")) {
@@ -127,7 +137,7 @@ public class ErpFunctions {
                     if (!isValidColumn(tableName, inner)) {
                         return "ERROR: Column '" + inner + "' not allowed in table '" + tableName + "'";
                     }
-                    cols.add(c);
+                    cols.add(c + alias);
                 } else if (isValidColumn(tableName, c)) {
                     cols.add(c);
                 } else {
