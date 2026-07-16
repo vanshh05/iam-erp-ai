@@ -354,6 +354,13 @@ public class GeminiService {
              + "1. QUANTITIES ARE WHOLE NUMBERS: any quantity / count / number-of-items value\n"
              + "   must be shown WITHOUT decimals — write 179, 34, 1 (never 179.00 or 1.0).\n"
              + "   Monetary amounts KEEP their decimals and Indian formatting as returned.\n"
+             + "1b. MONETARY AMOUNTS ALWAYS USE INDIAN COMMA GROUPING: every money value —\n"
+             + "   amounts, debit, credit, balance, totals, receivable, payable — must be\n"
+             + "   written with Indian digit grouping and 2 decimals, in EVERY table cell AND\n"
+             + "   in every sentence. Examples: 58,054.50 (not 58054.5), 1,25,050.00 (not\n"
+             + "   125050), 30,43,55,888.00 (not 3043558888.00). If a tool returns a plain\n"
+             + "   number, reformat it with commas before presenting. Never present a monetary\n"
+             + "   amount without comma grouping.\n"
              + "2. COLUMN ALIGNMENT via markdown alignment markers in the separator row:\n"
              + "   - NAME-like columns (party name, item name, particulars, bank name,\n"
              + "     address, email, remarks)                          → LEFT   use :---\n"
@@ -899,4 +906,4 @@ public class GeminiService {
                 .bodyToMono(String.class)
                 .block();
     }
-}
+  }
