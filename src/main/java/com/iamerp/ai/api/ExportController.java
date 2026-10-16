@@ -76,7 +76,8 @@ public class ExportController {
             "priority", "follow_up_user", "follow_up_date", "meeting_date",
             "meeting_agenda", "lead_status", "product_name",
             "is_price", "is_product", "is_other",
-            "follow_up_user_remarks", "customer_comments"
+            "follow_up_user_remarks", "customer_comments",
+            "worked_by", "worked_updated_date"
         ))
     );
 
@@ -86,7 +87,8 @@ public class ExportController {
         "payment_mode", "receipt_mode",
         "bill_no", "summary_date", "bill_date", "receipt_date", "payment_date",
         "city", "state", "customer_status", "priority", "lead_status", "lead_code",
-        "customer_date", "lead_date", "follow_up_date", "meeting_date"
+        "customer_date", "lead_date", "follow_up_date", "meeting_date",
+        "worked_updated_date"
     );
 
     public ExportController(DataSource dataSource, CompanyResolver companyResolver) {

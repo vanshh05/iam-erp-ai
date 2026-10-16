@@ -70,7 +70,8 @@ public class ErpFunctions {
             "priority", "follow_up_user", "follow_up_date", "meeting_date",
             "meeting_agenda", "lead_status", "product_name",
             "is_price", "is_product", "is_other",
-            "follow_up_user_remarks", "customer_comments"
+            "follow_up_user_remarks", "customer_comments",
+            "worked_by", "worked_updated_date"
         ))
     );
 
@@ -81,7 +82,8 @@ public class ErpFunctions {
     private static final Set<String> DATE_COLUMNS = Set.of(
         "bill_date", "voucher_date", "summary_date",
         "receipt_date", "payment_date", "last_bill_date",
-        "customer_date", "lead_date", "follow_up_date", "meeting_date"
+        "customer_date", "lead_date", "follow_up_date", "meeting_date",
+        "worked_updated_date"
     );
 
     public ErpFunctions(DataSource dataSource) {
@@ -545,9 +547,9 @@ public class ErpFunctions {
     // lead_event_id ASC (true insertion order = chronological journey).
     private String leadEventsFor(Connection conn, String idCol, String idVal,
                                  String companyId, String searched) throws SQLException {
-        String sql = "SELECT lead_code, lead_date, priority, follow_up_user, follow_up_date, "
-                   + "meeting_date, meeting_agenda, lead_status, product_name, "
-                   + "is_price, is_product, is_other, follow_up_user_remarks, customer_comments "
+        String sql = "SELECT lead_code, lead_date, priority, worked_by, worked_updated_date, "
+                   + "follow_up_user, follow_up_date, meeting_date, meeting_agenda, lead_status, "
+                   + "product_name, is_price, is_product, is_other, follow_up_user_remarks, customer_comments "
                    + "FROM ai_lead_event_info "
                    + "WHERE company_id = ? AND " + idCol + " = ? "
                    + "ORDER BY lead_event_id ASC LIMIT 2000";
