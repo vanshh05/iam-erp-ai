@@ -21,40 +21,57 @@ public class ErpFunctions {
 
     // Whitelist of allowed tables and their allowed columns
     // This prevents SQL injection AND stops Gemini from hallucinating column names
-    private static final Map<String, Set<String>> ALLOWED_COLUMNS = Map.of(
-        "ai_daily_summary", Set.of(
+    // NOTE: Map.ofEntries (not Map.of) — Map.of caps at 10 entries and we hit the edge
+    // adding the CRM tables. Add future tables as more Map.entry(...) lines; no ceiling.
+    private static final Map<String, Set<String>> ALLOWED_COLUMNS = Map.ofEntries(
+        Map.entry("ai_daily_summary", Set.of(
             "company_id", "summary_date",
             "total_sales", "cash_sales", "credit_sales", "total_bills_count",
             "total_collection", "cash_collection", "bank_collection",
             "total_payment", "cash_payment", "bank_payment",
             "total_receivable", "total_payable", "total_discount_given",
             "total_purchase", "cash_purchase", "credit_purchase"
-        ),
-        "ai_sales", Set.of(
+        )),
+        Map.entry("ai_sales", Set.of(
             "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
             "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
             "igst_amount", "invoice_amount", "taxable_amount", "payment_mode"
-        ),
-        "ai_party_status", Set.of(
+        )),
+        Map.entry("ai_party_status", Set.of(
             "company_id", "party_name", "party_type", "sub_party_type",
             "contact_number", "email", "address", "outstanding_balance", "balance_type",
             "last_bill_date", "last_bill_amount", "total_business_ytd",
             "credit_limit", "overdue_days", "gstin"
-        ),
-        "ai_collection_summary", Set.of(
+        )),
+        Map.entry("ai_collection_summary", Set.of(
             "company_id", "receipt_date", "party_name", "receipt_mode", "cheque_txn_no", "amount"
-        ),
-        "ai_payment_summary", Set.of(
+        )),
+        Map.entry("ai_payment_summary", Set.of(
             "company_id", "payment_date", "party_name", "payment_mode", "cheque_txn_no", "amount"
-        ),
-        "ai_bank_balance_summary", Set.of(
+        )),
+        Map.entry("ai_bank_balance_summary", Set.of(
             "company_id", "bank_name", "balance_type", "balance"
-        ),
-        "ai_purchase", Set.of(
+        )),
+        Map.entry("ai_purchase", Set.of(
             "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
             "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
             "igst_amount", "invoice_amount", "taxable_amount", "payment_mode"
-        )
+        )),
+        // CRM — potential customers not yet converted to leads
+        Map.entry("ai_customer_info", Set.of(
+            "company_id", "customer_id", "customer_code", "customer_date",
+            "company_name", "customer_name", "user_name", "source_of_info",
+            "designation", "product_cateogory", "gst_number", "mobile_no",
+            "email_id", "address", "city", "state", "customer_status", "customer_comments"
+        )),
+        // CRM — current status of each active lead (ONE row per lead)
+        Map.entry("ai_lead_info", Set.of(
+            "company_id", "customer_id", "lead_id", "lead_code", "lead_date",
+            "priority", "follow_up_user", "follow_up_date", "meeting_date",
+            "meeting_agenda", "lead_status", "product_name",
+            "is_price", "is_product", "is_other",
+            "follow_up_user_remarks", "customer_comments"
+        ))
     );
 
     private static final Set<String> ALLOWED_SORT_DIRECTIONS = Set.of("ASC", "DESC");
@@ -63,7 +80,8 @@ public class ErpFunctions {
     // are wrapped in DATE() so a plain yyyy-MM-dd value matches regardless of stored time.
     private static final Set<String> DATE_COLUMNS = Set.of(
         "bill_date", "voucher_date", "summary_date",
-        "receipt_date", "payment_date", "last_bill_date"
+        "receipt_date", "payment_date", "last_bill_date",
+        "customer_date", "lead_date", "follow_up_date", "meeting_date"
     );
 
     public ErpFunctions(DataSource dataSource) {
@@ -449,6 +467,130 @@ public class ErpFunctions {
             int[] t = prev; prev = curr; curr = t;
         }
         return prev[b.length()];
+    }
+
+    // ─── LEAD HISTORY (ai_lead_event_info) ───────────────────────────────────
+    // Returns the full chronological journey of ONE lead — every follow-up event
+    // in insertion order (lead_event_id ASC) so the user can see what happened
+    // after what. Isolated from query_table (which must only see ai_lead_info,
+    // one row per lead) so lead counts never get inflated by history rows.
+    //
+    // identifier is whatever the user gave: a company/customer name (most common),
+    // a numeric lead_id, or a numeric customer_id. kind tells us which:
+    //   "name"        -> match ai_customer_info.company_name / customer_name (LIKE),
+    //                    resolve to customer_id(s), then pull their events
+    //   "lead_id"     -> exact lead_id
+    //   "customer_id" -> exact customer_id
+    public String getLeadHistory(String identifier, String kind, String companyId) {
+        if (identifier == null || identifier.trim().isEmpty()) {
+            return "ERROR: A specific lead is required — give a customer/company name, "
+                 + "a lead_id, or a customer_id. Ask the user which lead's history they want.";
+        }
+        String id = identifier.trim();
+        String k = (kind == null ? "name" : kind.trim().toLowerCase());
+
+        try (Connection conn = dataSource.getConnection()) {
+
+            // When the user gave a NAME, first resolve it to one or more leads via
+            // ai_customer_info. If it matches several customers, ask rather than
+            // merging unrelated journeys.
+            if (k.equals("name")) {
+                List<String> custIds = new ArrayList<>();
+                List<String> custLabels = new ArrayList<>();
+                String lookup = "SELECT customer_id, company_name, customer_name FROM ai_customer_info "
+                              + "WHERE company_id = ? AND (LOWER(company_name) LIKE LOWER(?) "
+                              + "OR LOWER(customer_name) LIKE LOWER(?)) LIMIT 50";
+                try (PreparedStatement ps = conn.prepareStatement(lookup)) {
+                    ps.setString(1, companyId);
+                    ps.setString(2, "%" + id + "%");
+                    ps.setString(3, "%" + id + "%");
+                    ResultSet rs = ps.executeQuery();
+                    while (rs.next()) {
+                        custIds.add(rs.getString("customer_id"));
+                        String cn = rs.getString("company_name");
+                        custLabels.add((cn != null ? cn : rs.getString("customer_name"))
+                                       + " (customer " + rs.getString("customer_id") + ")");
+                    }
+                }
+                if (custIds.isEmpty()) {
+                    return "No customer matching '" + id + "' was found, so there is no lead "
+                         + "history to show. Ask the user to check the name.";
+                }
+                if (custIds.size() > 1) {
+                    ObjectNode multi = mapper.createObjectNode();
+                    multi.put("table", "ai_lead_event_info");
+                    multi.put("multiple_customers", true);
+                    multi.put("searched", id);
+                    ArrayNode arr = mapper.createArrayNode();
+                    custLabels.forEach(arr::add);
+                    multi.set("matched_customers", arr);
+                    return multi.toString();
+                }
+                // exactly one customer — pull their events by customer_id
+                return leadEventsFor(conn, "customer_id", custIds.get(0), companyId, id);
+            }
+
+            if (k.equals("lead_id"))     return leadEventsFor(conn, "lead_id", id, companyId, id);
+            if (k.equals("customer_id")) return leadEventsFor(conn, "customer_id", id, companyId, id);
+
+            return "ERROR: Unknown lead identifier kind '" + k + "'. "
+                 + "Use 'name', 'lead_id', or 'customer_id'.";
+
+        } catch (SQLException e) {
+            return "Database error: " + e.getMessage();
+        }
+    }
+
+    // Fetch and format the events for a resolved lead/customer, ordered by
+    // lead_event_id ASC (true insertion order = chronological journey).
+    private String leadEventsFor(Connection conn, String idCol, String idVal,
+                                 String companyId, String searched) throws SQLException {
+        String sql = "SELECT lead_code, lead_date, priority, follow_up_user, follow_up_date, "
+                   + "meeting_date, meeting_agenda, lead_status, product_name, "
+                   + "is_price, is_product, is_other, follow_up_user_remarks, customer_comments "
+                   + "FROM ai_lead_event_info "
+                   + "WHERE company_id = ? AND " + idCol + " = ? "
+                   + "ORDER BY lead_event_id ASC LIMIT 2000";
+
+        log.info("[ErpFunctions] SQL: {} | Params: [{}, {}]", sql, companyId, idVal);
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, companyId);
+            ps.setString(2, idVal);
+            ResultSet rs = ps.executeQuery();
+            ResultSetMetaData meta = rs.getMetaData();
+            int colCount = meta.getColumnCount();
+
+            ArrayNode rows = mapper.createArrayNode();
+            while (rs.next()) {
+                ObjectNode row = mapper.createObjectNode();
+                for (int i = 1; i <= colCount; i++) {
+                    String colName = meta.getColumnLabel(i);
+                    String colType = meta.getColumnTypeName(i);
+                    if (rs.getObject(i) == null) {
+                        row.putNull(colName);
+                    } else if (colType.contains("DECIMAL") || colType.contains("DOUBLE") || colType.contains("FLOAT")) {
+                        row.put(colName, fmt(rs.getDouble(i)));
+                    } else if (colType.contains("INT")) {
+                        row.put(colName, rs.getLong(i));
+                    } else {
+                        row.put(colName, rs.getString(i));
+                    }
+                }
+                rows.add(row);
+            }
+
+            if (rows.isEmpty()) {
+                return "No lead history events found for '" + searched + "'. The lead may exist "
+                     + "in the current-status table but have no recorded follow-up events yet.";
+            }
+
+            ObjectNode result = mapper.createObjectNode();
+            result.put("table", "ai_lead_event_info");
+            result.put("row_count", rows.size());
+            result.set("data", rows);
+            return result.toString();
+        }
     }
 
     // ─── 2. GET TABLE SCHEMA — lets Gemini know exact column names ───────────

@@ -23,55 +23,70 @@ public class ExportController {
     private final ObjectMapper mapper = new ObjectMapper();
 
     // Strict whitelist — same as ErpFunctions
-    private static final Map<String, Set<String>> ALLOWED_COLUMNS = Map.of(
-        "ai_daily_summary", Set.of(
+    private static final Map<String, Set<String>> ALLOWED_COLUMNS = Map.ofEntries(
+        Map.entry("ai_daily_summary", Set.of(
             "company_id", "summary_date",
             "total_sales", "cash_sales", "credit_sales", "total_bills_count",
             "total_collection", "cash_collection", "bank_collection",
             "total_payment", "cash_payment", "bank_payment",
             "total_receivable", "total_payable", "total_discount_given",
             "total_purchase", "cash_purchase", "credit_purchase"
-        ),
-        "ai_sales", Set.of(
+        )),
+        Map.entry("ai_sales", Set.of(
             "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
             "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
             "igst_amount", "invoice_amount", "taxable_amount", "payment_mode", "created_by"
-        ),
-        "ai_party_status", Set.of(
+        )),
+        Map.entry("ai_party_status", Set.of(
             "company_id", "party_name", "party_type", "sub_party_type",
             "contact_number", "email", "address", "outstanding_balance", "balance_type",
             "last_bill_date", "last_bill_amount", "total_business_ytd",
             "credit_limit", "overdue_days", "gstin"
-        ),
-        "ai_collection_summary", Set.of(
+        )),
+        Map.entry("ai_collection_summary", Set.of(
             "company_id", "receipt_date", "party_name", "receipt_mode", "cheque_txn_no", "amount"
-        ),
-        "ai_payment_summary", Set.of(
+        )),
+        Map.entry("ai_payment_summary", Set.of(
             "company_id", "payment_date", "party_name", "payment_mode", "cheque_txn_no", "amount"
-        ),
-        "ai_bank_balance_summary", Set.of(
+        )),
+        Map.entry("ai_bank_balance_summary", Set.of(
             "company_id", "bank_name", "balance_type", "balance"
-        ),
-        "ai_purchase", Set.of(
+        )),
+        Map.entry("ai_purchase", Set.of(
             "company_id", "bill_no", "bill_date", "voucher_date", "party_name",
             "gross_amount", "discount_amount", "sgst_amount", "cgst_amount",
             "igst_amount", "invoice_amount", "taxable_amount", "payment_mode"
-        ),
-        "ai_dispatch_summary", Set.of(
+        )),
+        Map.entry("ai_dispatch_summary", Set.of(
             "company_id", "item_name", "party_name", "invoice_no", "invoice_date", "quantity",
             "spec_value_1", "spec_value_2", "spec_value_3", "spec_value_4", "spec_value_5", "spec_value_6", "spec_value_7", "spec_value_8", "spec_value_9", "spec_value_10", "spec_value_11", "spec_value_12", "spec_value_13", "spec_value_14", "spec_value_15", "spec_value_16", "spec_value_17", "spec_value_18", "spec_value_19", "spec_value_20"
-        ),
-        "ai_stock_summary", Set.of(
+        )),
+        Map.entry("ai_stock_summary", Set.of(
             "company_id", "item_name", "quantity",
             "spec_value_1", "spec_value_2", "spec_value_3", "spec_value_4", "spec_value_5", "spec_value_6", "spec_value_7", "spec_value_8", "spec_value_9", "spec_value_10", "spec_value_11", "spec_value_12", "spec_value_13", "spec_value_14", "spec_value_15", "spec_value_16", "spec_value_17", "spec_value_18", "spec_value_19", "spec_value_20"
-        )
+        )),
+        Map.entry("ai_customer_info", Set.of(
+            "company_id", "customer_id", "customer_code", "customer_date",
+            "company_name", "customer_name", "user_name", "source_of_info",
+            "designation", "product_cateogory", "gst_number", "mobile_no",
+            "email_id", "address", "city", "state", "customer_status", "customer_comments"
+        )),
+        Map.entry("ai_lead_info", Set.of(
+            "company_id", "customer_id", "lead_id", "lead_code", "lead_date",
+            "priority", "follow_up_user", "follow_up_date", "meeting_date",
+            "meeting_agenda", "lead_status", "product_name",
+            "is_price", "is_product", "is_other",
+            "follow_up_user_remarks", "customer_comments"
+        ))
     );
 
     // Categorical columns that need exact = match (not LIKE)
     private static final Set<String> EXACT_MATCH_COLUMNS = Set.of(
         "party_type", "sub_party_type", "balance_type",
         "payment_mode", "receipt_mode",
-        "bill_no", "summary_date", "bill_date", "receipt_date", "payment_date"
+        "bill_no", "summary_date", "bill_date", "receipt_date", "payment_date",
+        "city", "state", "customer_status", "priority", "lead_status", "lead_code",
+        "customer_date", "lead_date", "follow_up_date", "meeting_date"
     );
 
     public ExportController(DataSource dataSource, CompanyResolver companyResolver) {

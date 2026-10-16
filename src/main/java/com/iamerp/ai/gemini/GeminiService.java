@@ -65,7 +65,7 @@ public class GeminiService {
              + "occurred and ask the user to retry. If a tool returns no rows, say no records were found\n"
              + "for that criteria. Fabricated business data is catastrophic — an empty answer is always\n"
              + "better than an invented one.\n\n"
-             + "=== DATABASE SCHEMA (7 TABLES) ===\n"
+             + "=== DATABASE SCHEMA (10 TABLES) ===\n"
              + "\n"
              + "TABLE: ai_daily_summary  — pre-aggregated daily totals (RESERVED: only for total_receivable/total_payable as on TODAY; historical rows unreliable)\n"
              + "  summary_date DATE\n"
@@ -115,6 +115,19 @@ public class GeminiService {
              + "\n"
              + "TABLE: ai_stock_spec_map  — maps spec columns to human labels per company\n"
              + "  company_id, spec_column (e.g. spec_value_1), spec_label (e.g. Color)\n"
+             + "\n"
+             + "=== CRM TABLES (sales pipeline) ===\n"
+             + "TABLE: ai_customer_info  — POTENTIAL customers whose lead is not yet created (the raw pipeline)\n"
+             + "  customer_id, customer_code, customer_date DATE, company_name, customer_name\n"
+             + "  user_name, source_of_info, designation, product_cateogory (NOTE: spelled exactly like this), gst_number\n"
+             + "  mobile_no, email_id, address, city, state, customer_status, customer_comments\n"
+             + "TABLE: ai_lead_info  — CURRENT status of each active lead (exactly ONE row per lead)\n"
+             + "  customer_id, lead_id, lead_code, lead_date DATE, priority (Low/Medium/High)\n"
+             + "  follow_up_user, follow_up_date DATE, meeting_date, meeting_agenda\n"
+             + "  lead_status (New/In-Progress/Closed), product_name\n"
+             + "  is_price, is_product, is_other  (1 = that aspect discussed AND customer satisfied; 0 = not yet discussed OR not satisfied)\n"
+             + "  follow_up_user_remarks, customer_comments\n"
+             + "TABLE: ai_lead_event_info  — full HISTORY of a lead: one row per follow-up event (MANY rows per lead). Reached ONLY via get_lead_history, never query_table.\n"
              + "\n"
              + "=== STOCK QUERY RULES ===\n"
              + "- ALWAYS call get_stock_spec_map FIRST before any stock query\n"
@@ -206,6 +219,9 @@ public class GeminiService {
              + "Bank/account balances                           → ai_bank_balance_summary\n"
              + "Party contact/address/balance/GSTIN             → ai_party_status\n"
              + "Party GENERAL LEDGER / statement / khata        → get_party_ledger tool ONLY (needs a party name; never query_table)\n"
+             + "Potential customers / pipeline / not-yet-leads  → ai_customer_info (query_table)\n"
+             + "Lead status / count / which leads / open leads  → ai_lead_info (query_table; ONE row per lead)\n"
+             + "Lead HISTORY / journey / all follow-ups of a lead → get_lead_history tool ONLY (needs a named lead; never query_table)\n"
              + "Stock / inventory / warehouse / items           → ai_stock_summary (use stock tools, NOT query_table)\n"
              + "\n"
              + "=== PARTY STATUS QUERIES ===\n"
@@ -258,6 +274,39 @@ public class GeminiService {
              + "  parties: reply with ONLY the {\"__suggestions__\": [...]} marker listing\n"
              + "  'Ledger of <name>' for each of matched_parties so the user picks one —\n"
              + "  do NOT merge ledgers of different parties into one statement.\n"
+             + "\n"
+             + "=== CRM / LEADS RULES ===\n"
+             + "THREE tables, three jobs — do not confuse them:\n"
+             + "- ai_customer_info = POTENTIAL customers (pipeline, leads not yet created). Use\n"
+             + "  for 'potential customers', 'pipeline', 'prospects', 'customers in <city>',\n"
+             + "  'who deals in <product_cateogory>', 'customers from <source>'.\n"
+             + "- ai_lead_info = CURRENT state of each lead, ONE row per lead. Use for 'how many\n"
+             + "  leads', 'open / in-progress / closed leads', 'high priority leads', 'leads to\n"
+             + "  follow up today', 'which leads for <product>'. COUNT questions ALWAYS use this\n"
+             + "  table — never ai_lead_event_info (that has many rows per lead and would inflate counts).\n"
+             + "- get_lead_history tool = full JOURNEY of ONE named lead (every follow-up event in\n"
+             + "  order). Use ONLY for 'history / journey / timeline / all follow-ups / progress /\n"
+             + "  full story of <customer>'s lead'. Pass identifier = the customer/company name\n"
+             + "  the user said (kind='name'); use kind='lead_id' or 'customer_id' only if they\n"
+             + "  clearly gave an id. If no lead is named, ask which one.\n"
+             + "  * If it returns multiple_customers=true, the name matched several customers:\n"
+             + "    reply with ONLY {\"__suggestions__\": [\"Lead history of <full label 1>\", ...]}\n"
+             + "    from matched_customers so the user picks one. Do NOT merge different leads.\n"
+             + "FLAG COLUMNS is_price / is_product / is_other (on ai_lead_info): value 1 means that\n"
+             + "  aspect has been discussed AND the customer is satisfied/agreed on it; 0 means not\n"
+             + "  yet discussed OR the customer is not satisfied. So 'leads where price is agreed'\n"
+             + "  → filter is_price = 1; 'leads still stuck on price' / 'price not sorted' →\n"
+             + "  is_price = 0. Same for is_product (the product itself) and is_other (other terms).\n"
+             + "  When showing these in a table, render 1 as 'Yes' and 0 as 'No' under clear\n"
+             + "  headers (Price Agreed, Product Agreed, Other Agreed) — do not show bare 1/0.\n"
+             + "PRESENTATION: for a customer or lead list, show the most useful columns for the\n"
+             + "  question (e.g. customer_name/company_name, mobile_no, city, product_cateogory,\n"
+             + "  customer_status for customers; lead_code, customer, priority, lead_status,\n"
+             + "  follow_up_user, follow_up_date, product_name for leads). For a lead history, show\n"
+             + "  the events in the returned order with columns Lead Date, Priority, Follow-up By,\n"
+             + "  Follow-up Date, Status, Agenda, Remarks — so the progression is readable.\n"
+             + "Lead/customer names, company names, remarks are TEXT columns — filter them with\n"
+             + "  LIKE and a keyword, never exact '='. City/state/status/priority are exact '='.\n"
              + "\n"
              + "=== BUSINESS TERMINOLOGY MAPPINGS — CRITICAL ===\n"
              + "Always apply these mappings before querying:\n"
@@ -469,6 +518,18 @@ public class GeminiService {
                     "party_name": { "type": "string", "description": "Name (or distinctive part of the name) of the party whose ledger is wanted. REQUIRED." }
                   },
                   "required": ["party_name"]
+                }
+              },
+              {
+                "name": "get_lead_history",
+                "description": "Get the complete HISTORY / JOURNEY of ONE lead from ai_lead_event_info: every follow-up event in chronological order (what was discussed, by whom, status at each step, remarks). ONLY use when the user explicitly asks for a lead's history / journey / timeline / all follow-ups / events / progress of a NAMED customer-company (or a specific lead_id / customer_id). Identify the lead by 'identifier' + 'kind'. If the user names no lead at all, ask which one. NEVER use this to COUNT leads or list current lead status — that is ai_lead_info via query_table (one row per lead). This tool returns many rows per lead and would inflate any count.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "identifier": { "type": "string", "description": "What the user gave to name the lead: usually a company/customer name; may also be a numeric lead_id or customer_id. REQUIRED." },
+                    "kind": { "type": "string", "enum": ["name", "lead_id", "customer_id"], "description": "Which kind 'identifier' is. Default 'name'. Use 'lead_id' only if the user clearly gave a lead id (e.g. LD-00012 or a lead number), 'customer_id' for a customer id, otherwise 'name'." }
+                  },
+                  "required": ["identifier"]
                 }
               },
               {
@@ -834,6 +895,7 @@ public class GeminiService {
             case "get_today_summary"   -> erpFunctions.getTodaySummary(companyId);
             case "get_overdue_parties" -> erpFunctions.getOverdueParties(args.path("min_overdue_days").asInt(1), companyId);
             case "get_party_ledger" -> erpFunctions.getPartyLedger(args.path("party_name").asText(""), companyId);
+            case "get_lead_history" -> erpFunctions.getLeadHistory(args.path("identifier").asText(""), args.path("kind").asText("name"), companyId);
             case "get_stock_spec_map"  -> stockFunctions.getSpecMap(companyId);
             case "query_stock" -> {
                 List<Map<String, String>> filters = new ArrayList<>();
@@ -906,4 +968,4 @@ public class GeminiService {
                 .bodyToMono(String.class)
                 .block();
     }
-  }
+}
