@@ -1,4 +1,5 @@
 com\iamerp\ai\api\ExportController.class
+com\iamerp\ai\api\DealerController.class
 com\iamerp\ai\api\AdminController.class
 com\iamerp\ai\model\PasswordReset.class
 com\iamerp\ai\security\JwtAuthFilter.class
@@ -13,6 +14,7 @@ com\iamerp\ai\security\SecurityConfig.class
 com\iamerp\ai\model\UserSession.class
 com\iamerp\ai\model\UserSessionRepository.class
 com\iamerp\ai\MainApplication.class
+com\iamerp\ai\functions\DealerFunctions.class
 com\iamerp\ai\api\ChatController.class
 com\iamerp\ai\model\User.class
 com\iamerp\ai\config\UserSeeder.class

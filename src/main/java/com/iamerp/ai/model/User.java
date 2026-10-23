@@ -32,6 +32,10 @@ public class User {
     @Column(name = "company_name")
     private String companyName;
 
+    // Only dealers have this — the party id assigned by the ERP, entered at creation.
+    @Column(name = "party_id")
+    private String partyId;
+
     @Column(name = "is_active")
     private Boolean isActive = true;
 
@@ -62,6 +66,9 @@ public class User {
 
     public String getCompanyName() { return companyName; }
     public void setCompanyName(String companyName) { this.companyName = companyName; }
+
+    public String getPartyId() { return partyId; }
+    public void setPartyId(String partyId) { this.partyId = partyId; }
 
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }

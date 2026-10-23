@@ -45,6 +45,10 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 // Admin endpoints require ADMIN role
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                // Dealer endpoints require DEALER role (and nobody else can reach them)
+                .requestMatchers("/api/dealer/**").hasRole("DEALER")
+                // The AI + export surfaces are for business users only — dealers are blocked
+                .requestMatchers("/api/chat", "/api/export").hasAnyRole("OWNER", "ADMIN")
                 // Everything else requires a valid token
                 .anyRequest().authenticated()
             )

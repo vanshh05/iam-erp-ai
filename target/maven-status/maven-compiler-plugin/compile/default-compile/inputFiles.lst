@@ -8,6 +8,7 @@ E:\iam-erp-ai\src\main\java\com\iamerp\ai\config\SchemaRoutingDataSource.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\security\JwtService.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\security\JwtAuthFilter.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\api\PasswordResetController.java
+E:\iam-erp-ai\src\main\java\com\iamerp\ai\api\DealerController.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\model\UserSessionRepository.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\email\EmailService.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\functions\StockFunctions.java
@@ -19,6 +20,7 @@ E:\iam-erp-ai\src\main\java\com\iamerp\ai\model\PasswordResetRepository.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\security\CompanyResolver.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\functions\DispatchFunctions.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\gemini\GeminiService.java
+E:\iam-erp-ai\src\main\java\com\iamerp\ai\functions\DealerFunctions.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\api\AuthController.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\config\UserSeeder.java
 E:\iam-erp-ai\src\main\java\com\iamerp\ai\model\UserRepository.java

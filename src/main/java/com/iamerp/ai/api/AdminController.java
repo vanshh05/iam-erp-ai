@@ -48,6 +48,7 @@ public class AdminController {
         String companyName = str(body, "company_name");
         String email       = str(body, "email");
         String role        = body.get("role") == null ? "Owner" : str(body, "role");
+        String partyId     = str(body, "party_id"); // only dealers need this
 
         if (username.isEmpty() || password.isEmpty() || companyId.isEmpty()) {
             res.put("success", false);
@@ -68,6 +69,7 @@ public class AdminController {
         u.setRole(role);
         u.setCompanyId(companyId);
         u.setCompanyName(companyName);
+        u.setPartyId(partyId.isEmpty() ? null : partyId);
         u.setIsActive(true);
         userRepository.save(u);
 
@@ -106,6 +108,10 @@ public class AdminController {
         if (body.containsKey("role"))         u.setRole(str(body, "role"));
         if (body.containsKey("company_id"))   u.setCompanyId(str(body, "company_id"));
         if (body.containsKey("company_name")) u.setCompanyName(str(body, "company_name"));
+        if (body.containsKey("party_id")) {
+            String pid = str(body, "party_id");
+            u.setPartyId(pid.isEmpty() ? null : pid);
+        }
         // Optional password reset
         if (body.containsKey("password")) {
             String pw = str(body, "password");
@@ -232,6 +238,7 @@ public class AdminController {
         m.put("role", u.getRole());
         m.put("company_id", u.getCompanyId());
         m.put("company_name", u.getCompanyName());
+        m.put("party_id", u.getPartyId());
         m.put("is_active", u.getIsActive());
         return m; // deliberately NO password hash
     }
