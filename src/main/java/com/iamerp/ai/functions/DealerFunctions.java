@@ -13,7 +13,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -207,7 +210,128 @@ public class DealerFunctions {
         }
     }
 
+    // ─── WRITE: reserve several available units in one request ────────────────
+    // Best-effort: each unit is reserved independently. Units that were snatched
+    // between load and tap are reported in "failed"; the rest still go through.
+    // First-tap-wins is preserved per unit (the same conditional UPDATE).
+    public String reserveBulk(String companyId, String partyId, String username, List<String> chassisNos) {
+        if (partyId == null || partyId.isBlank()) {
+            return errorJson("This dealer account has no party id configured. Contact the administrator.");
+        }
+        LinkedHashSet<String> unique = dedupe(chassisNos);
+        if (unique.isEmpty()) {
+            return errorJson("No items selected to reserve.");
+        }
+        try (Connection conn = dataSource.getConnection()) {
+            String chassisCol = chassisColumnOf(loadSpecMap(conn, companyId));
+            if (chassisCol == null) {
+                return errorJson("Chassis mapping not found for this company. Contact the administrator.");
+            }
+            String sql = "UPDATE " + dealersTable + " SET "
+                       + "item_status = 'Reserved', is_available = 0, party_id = ?, "
+                       + "last_updated_by = ?, last_updated_date = NOW() "
+                       + "WHERE company_id = ? AND " + chassisCol + " = ? AND item_status = 'Available'";
+
+            ArrayNode reserved = mapper.createArrayNode();
+            ArrayNode failed   = mapper.createArrayNode();
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                for (String chassis : unique) {
+                    ps.setString(1, partyId);
+                    ps.setString(2, username);
+                    ps.setString(3, companyId);
+                    ps.setString(4, chassis);
+                    if (ps.executeUpdate() == 1) {
+                        reserved.add(chassis);
+                    } else {
+                        failed.add(failRow(chassis, "No longer available"));
+                    }
+                }
+            }
+            log.info("[DealerFunctions] reserveBulk company='{}' by='{}' reserved={} failed={}",
+                     companyId, username, reserved.size(), failed.size());
+
+            ObjectNode res = mapper.createObjectNode();
+            res.put("success", true);
+            res.put("reserved_count", reserved.size());
+            res.put("failed_count", failed.size());
+            res.set("reserved", reserved);
+            res.set("failed", failed);
+            return res.toString();
+        } catch (SQLException e) {
+            log.error("[DealerFunctions] reserveBulk DB error: {}", e.getMessage());
+            return errorJson("Database error: " + e.getMessage());
+        }
+    }
+
+    // ─── WRITE: cancel several of this dealer's own reservations in one request ─
+    public String unreserveBulk(String companyId, String partyId, List<String> chassisNos) {
+        if (partyId == null || partyId.isBlank()) {
+            return errorJson("This dealer account has no party id configured. Contact the administrator.");
+        }
+        LinkedHashSet<String> unique = dedupe(chassisNos);
+        if (unique.isEmpty()) {
+            return errorJson("No items selected to un-reserve.");
+        }
+        try (Connection conn = dataSource.getConnection()) {
+            String chassisCol = chassisColumnOf(loadSpecMap(conn, companyId));
+            if (chassisCol == null) {
+                return errorJson("Chassis mapping not found for this company. Contact the administrator.");
+            }
+            String sql = "UPDATE " + dealersTable + " SET "
+                       + "item_status = 'Available', is_available = 1, party_id = NULL, "
+                       + "last_updated_by = NULL, last_updated_date = NULL "
+                       + "WHERE company_id = ? AND " + chassisCol + " = ? "
+                       + "AND item_status = 'Reserved' AND party_id = ?";
+
+            ArrayNode unreserved = mapper.createArrayNode();
+            ArrayNode failed     = mapper.createArrayNode();
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                for (String chassis : unique) {
+                    ps.setString(1, companyId);
+                    ps.setString(2, chassis);
+                    ps.setString(3, partyId);
+                    if (ps.executeUpdate() == 1) {
+                        unreserved.add(chassis);
+                    } else {
+                        failed.add(failRow(chassis, "Not found under your account"));
+                    }
+                }
+            }
+            log.info("[DealerFunctions] unreserveBulk company='{}' party='{}' unreserved={} failed={}",
+                     companyId, partyId, unreserved.size(), failed.size());
+
+            ObjectNode res = mapper.createObjectNode();
+            res.put("success", true);
+            res.put("unreserved_count", unreserved.size());
+            res.put("failed_count", failed.size());
+            res.set("unreserved", unreserved);
+            res.set("failed", failed);
+            return res.toString();
+        } catch (SQLException e) {
+            log.error("[DealerFunctions] unreserveBulk DB error: {}", e.getMessage());
+            return errorJson("Database error: " + e.getMessage());
+        }
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────
+
+    /** Trim, drop blanks, and de-duplicate a list of chassis numbers (order kept). */
+    private static LinkedHashSet<String> dedupe(List<String> chassisNos) {
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        if (chassisNos != null) {
+            for (String c : chassisNos) {
+                if (c != null && !c.isBlank()) unique.add(c.trim());
+            }
+        }
+        return unique;
+    }
+
+    private ObjectNode failRow(String chassis, String message) {
+        ObjectNode f = mapper.createObjectNode();
+        f.put("chassis_no", chassis);
+        f.put("message", message);
+        return f;
+    }
 
     /** spec_value_N -> human label, for this company, from the primary schema's spec map. */
     private Map<String, String> loadSpecMap(Connection conn, String companyId) throws SQLException {
