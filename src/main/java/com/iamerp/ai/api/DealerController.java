@@ -59,7 +59,7 @@ public class DealerController {
         User u = companyResolver.currentUser();
         if (u == null) return unauthorized();
         String chassis = chassisOf(body);
-        String json = dealerFunctions.unreserve(u.getCompanyId(), u.getPartyId(), chassis);
+        String json = dealerFunctions.unreserve(u.getCompanyId(), u.getPartyId(), u.getUsername(), chassis);
         return ResponseEntity.ok(json);
     }
 
@@ -79,7 +79,7 @@ public class DealerController {
         User u = companyResolver.currentUser();
         if (u == null) return unauthorized();
         List<String> chassis = chassisListOf(body);
-        String json = dealerFunctions.unreserveBulk(u.getCompanyId(), u.getPartyId(), chassis);
+        String json = dealerFunctions.unreserveBulk(u.getCompanyId(), u.getPartyId(), u.getUsername(), chassis);
         return ResponseEntity.ok(json);
     }
 

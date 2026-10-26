@@ -152,7 +152,7 @@ public class DealerFunctions {
             // Conditional update — only succeeds if the row is still Available.
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Reserved', is_available = 0, party_id = ?, "
-                       + "last_updated_by = ?, last_updated_date = NOW() "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
                        + "WHERE company_id = ? AND " + chassisCol + " = ? AND item_status = 'Available'";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, partyId);
@@ -174,7 +174,7 @@ public class DealerFunctions {
     }
 
     // ─── WRITE: un-reserve this dealer's own reservation (full revert) ────────
-    public String unreserve(String companyId, String partyId, String chassisNo) {
+    public String unreserve(String companyId, String partyId, String username, String chassisNo) {
         if (partyId == null || partyId.isBlank()) {
             return errorJson("This dealer account has no party id configured. Contact the administrator.");
         }
@@ -186,16 +186,18 @@ public class DealerFunctions {
             if (chassisCol == null) {
                 return errorJson("Chassis mapping not found for this company. Contact the administrator.");
             }
-            // Revert fully to the pre-reservation state. Only the dealer's OWN reservation.
+            // Return the unit to the available pool, but keep who/when as an audit stamp and
+            // flag status='open' for the ERP to pick up. Only the dealer's OWN reservation.
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Available', is_available = 1, party_id = NULL, "
-                       + "last_updated_by = NULL, last_updated_date = NULL "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
                        + "WHERE company_id = ? AND " + chassisCol + " = ? "
                        + "AND item_status = 'Reserved' AND party_id = ?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, companyId);
-                ps.setString(2, chassisNo);
-                ps.setString(3, partyId);
+                ps.setString(1, username);
+                ps.setString(2, companyId);
+                ps.setString(3, chassisNo);
+                ps.setString(4, partyId);
                 int changed = ps.executeUpdate();
                 log.info("[DealerFunctions] unreserve company='{}' chassis='{}' party='{}' changed={}",
                          companyId, chassisNo, partyId, changed);
@@ -229,7 +231,7 @@ public class DealerFunctions {
             }
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Reserved', is_available = 0, party_id = ?, "
-                       + "last_updated_by = ?, last_updated_date = NOW() "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
                        + "WHERE company_id = ? AND " + chassisCol + " = ? AND item_status = 'Available'";
 
             ArrayNode reserved = mapper.createArrayNode();
@@ -264,7 +266,7 @@ public class DealerFunctions {
     }
 
     // ─── WRITE: cancel several of this dealer's own reservations in one request ─
-    public String unreserveBulk(String companyId, String partyId, List<String> chassisNos) {
+    public String unreserveBulk(String companyId, String partyId, String username, List<String> chassisNos) {
         if (partyId == null || partyId.isBlank()) {
             return errorJson("This dealer account has no party id configured. Contact the administrator.");
         }
@@ -279,7 +281,7 @@ public class DealerFunctions {
             }
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Available', is_available = 1, party_id = NULL, "
-                       + "last_updated_by = NULL, last_updated_date = NULL "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
                        + "WHERE company_id = ? AND " + chassisCol + " = ? "
                        + "AND item_status = 'Reserved' AND party_id = ?";
 
@@ -287,9 +289,10 @@ public class DealerFunctions {
             ArrayNode failed     = mapper.createArrayNode();
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 for (String chassis : unique) {
-                    ps.setString(1, companyId);
-                    ps.setString(2, chassis);
-                    ps.setString(3, partyId);
+                    ps.setString(1, username);
+                    ps.setString(2, companyId);
+                    ps.setString(3, chassis);
+                    ps.setString(4, partyId);
                     if (ps.executeUpdate() == 1) {
                         unreserved.add(chassis);
                     } else {
