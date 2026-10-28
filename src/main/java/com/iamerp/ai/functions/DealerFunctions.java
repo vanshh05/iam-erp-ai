@@ -161,8 +161,8 @@ public class DealerFunctions {
             // Conditional update — only succeeds if the row is still Available.
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Reserved', is_available = 0, party_id = ?, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
-                       + "WHERE company_id = ? AND " + chassisCol + " = ? AND item_status = 'Available'";
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "WHERE company_id = ? AND " + chassisMatch(chassisCol) + " AND item_status = 'Available'";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, partyId);
                 ps.setString(2, username);
@@ -199,8 +199,8 @@ public class DealerFunctions {
             // flag status='open' for the ERP to pick up. Only the dealer's OWN reservation.
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Available', is_available = 1, party_id = NULL, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
-                       + "WHERE company_id = ? AND " + chassisCol + " = ? "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "WHERE company_id = ? AND " + chassisMatch(chassisCol) + " "
                        + "AND item_status = 'Reserved' AND party_id = ?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, username);
@@ -240,8 +240,8 @@ public class DealerFunctions {
             }
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Reserved', is_available = 0, party_id = ?, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
-                       + "WHERE company_id = ? AND " + chassisCol + " = ? AND item_status = 'Available'";
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "WHERE company_id = ? AND " + chassisMatch(chassisCol) + " AND item_status = 'Available'";
 
             ArrayNode reserved = mapper.createArrayNode();
             ArrayNode failed   = mapper.createArrayNode();
@@ -290,8 +290,8 @@ public class DealerFunctions {
             }
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Available', is_available = 1, party_id = NULL, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
-                       + "WHERE company_id = ? AND " + chassisCol + " = ? "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "WHERE company_id = ? AND " + chassisMatch(chassisCol) + " "
                        + "AND item_status = 'Reserved' AND party_id = ?";
 
             ArrayNode unreserved = mapper.createArrayNode();
@@ -373,6 +373,18 @@ public class DealerFunctions {
             }
         }
         return null;
+    }
+
+    /**
+     * Whitespace-tolerant equality for the chassis column. The read path trims the
+     * stored value (JS .trim()) before the app sends it back, so a value with a stray
+     * leading/trailing space, tab, CR or LF — common from spreadsheet/CSV imports —
+     * would fail a plain "= ?" match even though the item is clearly present. We strip
+     * the same whitespace from the stored value so reserve/un-reserve still match it.
+     * Works on all MySQL versions.
+     */
+    private static String chassisMatch(String chassisCol) {
+        return "TRIM(BOTH '\\t' FROM TRIM(BOTH '\\r' FROM TRIM(BOTH '\\n' FROM TRIM(" + chassisCol + ")))) = ?";
     }
 
     /** Only allow simple identifiers for interpolated schema names; fall back to default. */
