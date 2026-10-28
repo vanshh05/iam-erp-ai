@@ -74,12 +74,20 @@ public class DealerFunctions {
                 ? mapper.createArrayNode()
                 : fetchRows(conn, companyId, "item_status = 'Reserved' AND party_id = ?", partyId, specMap);
 
+            // Dispatched FOR this dealer — set by the ERP, read-only here. Match both
+            // 'Dispatch' and 'Dispatched' so it works whichever string the ERP writes.
+            ArrayNode dispatched = (partyId == null || partyId.isBlank())
+                ? mapper.createArrayNode()
+                : fetchRows(conn, companyId, "item_status IN ('Dispatch', 'Dispatched') AND party_id = ?", partyId, specMap);
+
             ObjectNode result = mapper.createObjectNode();
             result.put("success", true);
             result.put("available_count", available.size());
             result.put("reserved_count", myReservations.size());
+            result.put("dispatched_count", dispatched.size());
             result.set("available", available);
             result.set("my_reservations", myReservations);
+            result.set("dispatched", dispatched);
             return result.toString();
 
         } catch (SQLException e) {
@@ -95,7 +103,7 @@ public class DealerFunctions {
                    + "spec_value_6, spec_value_7, spec_value_8, spec_value_9, spec_value_10, "
                    + "spec_value_11, spec_value_12, spec_value_13, spec_value_14, spec_value_15, "
                    + "spec_value_16, spec_value_17, spec_value_18, spec_value_19, spec_value_20, "
-                   + "item_status "
+                   + "item_status, last_updated_date "
                    + "FROM " + dealersTable + " "
                    + "WHERE company_id = ? AND " + statusClause + " "
                    + "ORDER BY item_name LIMIT 5000";
@@ -112,6 +120,7 @@ public class DealerFunctions {
                 ObjectNode row = mapper.createObjectNode();
                 row.put("item_name", rs.getString("item_name"));
                 row.put("item_status", rs.getString("item_status"));
+                row.put("last_updated_date", rs.getString("last_updated_date"));
 
                 // Build the labelled spec object + capture the chassis value (the reserve key)
                 ObjectNode specs = mapper.createObjectNode();
@@ -152,7 +161,7 @@ public class DealerFunctions {
             // Conditional update — only succeeds if the row is still Available.
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Reserved', is_available = 0, party_id = ?, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
                        + "WHERE company_id = ? AND " + chassisCol + " = ? AND item_status = 'Available'";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, partyId);
@@ -190,7 +199,7 @@ public class DealerFunctions {
             // flag status='open' for the ERP to pick up. Only the dealer's OWN reservation.
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Available', is_available = 1, party_id = NULL, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
                        + "WHERE company_id = ? AND " + chassisCol + " = ? "
                        + "AND item_status = 'Reserved' AND party_id = ?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -231,7 +240,7 @@ public class DealerFunctions {
             }
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Reserved', is_available = 0, party_id = ?, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
                        + "WHERE company_id = ? AND " + chassisCol + " = ? AND item_status = 'Available'";
 
             ArrayNode reserved = mapper.createArrayNode();
@@ -281,7 +290,7 @@ public class DealerFunctions {
             }
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Available', is_available = 1, party_id = NULL, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
                        + "WHERE company_id = ? AND " + chassisCol + " = ? "
                        + "AND item_status = 'Reserved' AND party_id = ?";
 
