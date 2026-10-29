@@ -161,7 +161,7 @@ public class DealerFunctions {
             // Conditional update — only succeeds if the row is still Available.
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Reserved', is_available = 0, party_id = ?, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
                        + "WHERE company_id = ? AND " + chassisMatch(chassisCol) + " AND item_status = 'Available'";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, partyId);
@@ -199,7 +199,7 @@ public class DealerFunctions {
             // flag status='open' for the ERP to pick up. Only the dealer's OWN reservation.
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Available', is_available = 1, party_id = NULL, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
                        + "WHERE company_id = ? AND " + chassisMatch(chassisCol) + " "
                        + "AND item_status = 'Reserved' AND party_id = ?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -240,7 +240,7 @@ public class DealerFunctions {
             }
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Reserved', is_available = 0, party_id = ?, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
                        + "WHERE company_id = ? AND " + chassisMatch(chassisCol) + " AND item_status = 'Available'";
 
             ArrayNode reserved = mapper.createArrayNode();
@@ -290,7 +290,7 @@ public class DealerFunctions {
             }
             String sql = "UPDATE " + dealersTable + " SET "
                        + "item_status = 'Available', is_available = 1, party_id = NULL, "
-                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'open' "
+                       + "last_updated_by = ?, last_updated_date = NOW(), status = 'Open' "
                        + "WHERE company_id = ? AND " + chassisMatch(chassisCol) + " "
                        + "AND item_status = 'Reserved' AND party_id = ?";
 
