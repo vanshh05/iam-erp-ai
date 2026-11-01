@@ -45,6 +45,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 // Admin endpoints require ADMIN role
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                // Notification poke is called by the ERP (shared secret checked in the controller),
+                // so it must sit BEFORE the dealer-role rule below.
+                .requestMatchers(HttpMethod.POST, "/api/dealer/notify/poke").permitAll()
                 // Dealer endpoints require DEALER role (and nobody else can reach them)
                 .requestMatchers("/api/dealer/**").hasRole("DEALER")
                 // The AI + export surfaces are for business users only — dealers are blocked
