@@ -69,7 +69,7 @@ public class DealerNotifyFunctions {
             // Collect first, then act — avoids nested statements on one streaming result.
             List<String[]> rows = new ArrayList<>();
             String sel = "SELECT company_id, chassis_no, party_id, created_by FROM " + notifyTable
-                       + " WHERE status = 'open' AND (notified IS NULL OR notified = 0)";
+                       + " WHERE LOWER(status) = 'open' AND (notified IS NULL OR notified = 0)";
             try (PreparedStatement ps = conn.prepareStatement(sel);
                  ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -110,7 +110,7 @@ public class DealerNotifyFunctions {
                 try (PreparedStatement up = conn.prepareStatement(
                         "UPDATE " + notifyTable + " SET notified = 1 "
                       + "WHERE company_id = ? AND chassis_no = ? AND party_id = ? "
-                      + "AND status = 'open' AND (notified IS NULL OR notified = 0)")) {
+                      + "AND LOWER(status) = 'open' AND (notified IS NULL OR notified = 0)")) {
                     up.setString(1, companyId);
                     up.setString(2, rawChassis);   // exact stored value
                     up.setString(3, partyId);
@@ -136,7 +136,7 @@ public class DealerNotifyFunctions {
         try (Connection conn = dataSource.getConnection()) {
             List<String[]> rows = new ArrayList<>();
             String sel = "SELECT chassis_no, created_by, created_date, remarks FROM " + notifyTable
-                       + " WHERE company_id = ? AND party_id = ? AND status = 'open' "
+                       + " WHERE company_id = ? AND party_id = ? AND LOWER(status) = 'open' "
                        + "ORDER BY created_date DESC";
             try (PreparedStatement ps = conn.prepareStatement(sel)) {
                 ps.setString(1, companyId);
@@ -185,9 +185,9 @@ public class DealerNotifyFunctions {
         try (Connection conn = dataSource.getConnection()) {
             int closed = 0;
             if (chassisNos != null && !chassisNos.isEmpty()) {
-                String sql = "UPDATE " + notifyTable + " SET status = 'close', "
+                String sql = "UPDATE " + notifyTable + " SET status = 'Close', "
                            + "last_updated_by = ?, last_updated_date = NOW() "
-                           + "WHERE company_id = ? AND party_id = ? AND status = 'open' AND chassis_no = ?";
+                           + "WHERE company_id = ? AND party_id = ? AND LOWER(status) = 'open' AND chassis_no = ?";
                 try (PreparedStatement ps = conn.prepareStatement(sql)) {
                     for (String ch : chassisNos) {
                         if (ch == null || ch.isBlank()) continue;
@@ -200,9 +200,9 @@ public class DealerNotifyFunctions {
                 }
             } else {
                 // No list given — close ALL open for this dealer (the app's "dismiss" path).
-                String sql = "UPDATE " + notifyTable + " SET status = 'close', "
+                String sql = "UPDATE " + notifyTable + " SET status = 'Close', "
                            + "last_updated_by = ?, last_updated_date = NOW() "
-                           + "WHERE company_id = ? AND party_id = ? AND status = 'open'";
+                           + "WHERE company_id = ? AND party_id = ? AND LOWER(status) = 'open'";
                 try (PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, username);
                     ps.setString(2, companyId);
