@@ -86,6 +86,17 @@ public class ErpFunctions {
         "worked_updated_date"
     );
 
+    // The primary date column used for period (month/day/quarter/year/week) bucketing
+    // per table. Enables DB-side GROUP BY DATE_FORMAT(...) so the model never has to
+    // sum rows itself. Tables not listed here do not support period grouping.
+    private static final Map<String, String> PERIOD_DATE_COLUMN = Map.ofEntries(
+        Map.entry("ai_sales", "bill_date"),
+        Map.entry("ai_purchase", "bill_date"),
+        Map.entry("ai_collection_summary", "receipt_date"),
+        Map.entry("ai_payment_summary", "payment_date"),
+        Map.entry("ai_daily_summary", "summary_date")
+    );
+
     public ErpFunctions(DataSource dataSource) {
         this.dataSource = dataSource;
     }
@@ -167,6 +178,39 @@ public class ErpFunctions {
             selectClause = String.join(", ", cols);
         }
 
+        // ── Period bucketing (DB-side) ───────────────────────────────────────
+        // When the model asks for a month/day/quarter/year/week breakdown it passes
+        // group_by="month" (etc.). We translate that into a DATE_FORMAT bucket and let
+        // MySQL compute each bucket's SUM/COUNT — the model must NEVER add rows up itself.
+        // A real column name (e.g. group_by="party_name") still means a normal GROUP BY.
+        String periodExpr = null;
+        if (groupBy != null && !groupBy.isBlank()) {
+            String g = groupBy.trim().toLowerCase();
+            if (!isValidColumn(tableName, g)) {
+                String key = null;
+                if      (g.contains("month"))   key = "month";
+                else if (g.contains("quarter")) key = "quarter";
+                else if (g.contains("week"))    key = "week";
+                else if (g.contains("year"))    key = "year";
+                else if (g.contains("day") || g.contains("date")) key = "day";
+                if (key != null) {
+                    String dateCol = PERIOD_DATE_COLUMN.get(tableName);
+                    if (dateCol == null) {
+                        return "ERROR: Period grouping ('" + groupBy + "') is not available for table '"
+                             + tableName + "'. It works on ai_sales, ai_purchase, ai_collection_summary, "
+                             + "ai_payment_summary and ai_daily_summary.";
+                    }
+                    periodExpr = switch (key) {
+                        case "day"     -> "DATE_FORMAT(" + dateCol + ", '%Y-%m-%d')";
+                        case "year"    -> "DATE_FORMAT(" + dateCol + ", '%Y')";
+                        case "week"    -> "DATE_FORMAT(" + dateCol + ", '%x-W%v')";
+                        case "quarter" -> "CONCAT(YEAR(" + dateCol + "), '-Q', QUARTER(" + dateCol + "))";
+                        default        -> "DATE_FORMAT(" + dateCol + ", '%Y-%m')";  // month
+                    };
+                }
+            }
+        }
+
         // Validate limit
         int safeLimit = Math.min(Math.max(limit <= 0 ? 2000 : limit, 1), 2000);
 
@@ -174,7 +218,7 @@ public class ErpFunctions {
         String safeSortDir = ALLOWED_SORT_DIRECTIONS.contains(
                 sortDir != null ? sortDir.toUpperCase() : "") ? sortDir.toUpperCase() : "DESC";
         String orderClause = "";
-        if (orderBy != null && !orderBy.isBlank()) {
+        if (periodExpr == null && orderBy != null && !orderBy.isBlank()) {
             // Allow aggregate functions in order by too
             String ob = orderBy.trim().toLowerCase();
             boolean validOrderBy = isValidColumn(tableName, ob)
@@ -188,12 +232,24 @@ public class ErpFunctions {
 
         // Validate group_by
         String groupClause = "";
-        if (groupBy != null && !groupBy.isBlank()) {
+        if (periodExpr == null && groupBy != null && !groupBy.isBlank()) {
             String gb = groupBy.trim().toLowerCase();
             if (!isValidColumn(tableName, gb)) {
                 return "ERROR: Cannot group by '" + groupBy + "' — column not in table";
             }
             groupClause = " GROUP BY " + gb;
+        }
+
+        // Period mode: inject the bucket as the first column and group+order by it
+        // chronologically. Every total is computed by MySQL, one row per bucket.
+        if (periodExpr != null) {
+            if ("*".equals(selectClause)) {
+                return "ERROR: For a period breakdown, pass select_columns as an aggregate such as "
+                     + "'SUM(invoice_amount) as total_sales' (not all columns).";
+            }
+            selectClause = periodExpr + " AS period, " + selectClause;
+            groupClause  = " GROUP BY " + periodExpr;
+            orderClause  = " ORDER BY " + periodExpr + " ASC";
         }
 
         // Build WHERE clause from filters
